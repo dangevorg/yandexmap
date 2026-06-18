@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Glasses Yandex HUD Navigator</title>
     
-    <!-- Open access Yandex Maps API with routing capabilities -->
     <script src="https://api-maps.yandex.ru/2.1/?lang=en_US" type="text/javascript"></script>
 
     <style>
@@ -29,6 +28,19 @@
         /* High-contrast smart overlay for HUD transparent lens */
         .ymaps-2-1-79-map {
             filter: invert(100%) hue-rotate(180deg) brightness(100%) contrast(100%);
+        }
+
+        /* CRITICAL: Hide all popups, balloons, and routing control panels that contain external links */
+        .ymaps-2-1-79-balloon, 
+        .ymaps-2-1-79-route-panel, 
+        .ymaps-2-1-79-copyright, 
+        .ymaps-2-1-79-map-links,
+        [class*="balloon"], 
+        [class*="links"], 
+        [class*="route-panel"] {
+            display: none !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
         }
 
         #status-bar {
@@ -65,14 +77,25 @@
         let currentRoute = null;
         let userCoords = [40.1792, 44.5152]; // Default fallback location
         
-        // --- DEFINE YOUR PRESETS HERE ---
-        // Tip: You can change these addresses or coordinates to your actual Home/Work!
         const destinations = [
             { name: "My Current Position Only", coords: null },
             { name: "Heading: Home/Republic Square", address: "Yerevan, Republic Square" },
             { name: "Heading: Work / Cascade Complex", address: "Yerevan, Cascade" }
         ];
         let activeIndex = 0;
+
+        // Force lock all link clicks inside the web view sandbox
+        document.addEventListener('click', function(e) {
+            let target = e.target;
+            while (target && target !== document) {
+                if (target.tagName === 'A' || target.getAttribute('href')) {
+                    e.preventDefault(); // Stop the link from opening outside
+                    e.stopPropagation();
+                    return false;
+                }
+                target = target.parentNode;
+            }
+        }, true);
 
         ymaps.ready(init);
         function init() {
@@ -82,7 +105,6 @@
                 controls: []
             });
 
-            // Start actively watching location
             trackLocation();
         }
 
@@ -107,24 +129,23 @@
         function updateNavigation() {
             const currentTarget = destinations[activeIndex];
 
-            // Clear old routes off the screen
             if (currentRoute) {
                 map.geoObjects.remove(currentRoute);
                 currentRoute = null;
             }
 
             if (!currentTarget.coords && !currentTarget.address) {
-                // Mode 1: Just show where I am right now
                 map.setCenter(userCoords, 16);
                 document.getElementById('main-status').innerText = "Tracking Position";
                 document.getElementById('sub-status').innerText = "Tap/Swipe Left/Right to choose destination";
                 
-                // Add simple placeholder dot
-                let singlePlacemark = new ymaps.Placemark(userCoords, {}, { preset: 'islands#redCircleDotIcon' });
+                let singlePlacemark = new ymaps.Placemark(userCoords, {}, { 
+                    preset: 'islands#redCircleDotIcon',
+                    hasBalloon: false // Completely blocks popups on click
+                });
                 currentRoute = singlePlacemark;
                 map.geoObjects.add(singlePlacemark);
             } else {
-                // Mode 2: Draw an active route from user to destination
                 document.getElementById('main-status').innerText = "Calculating Route...";
                 document.getElementById('sub-status').innerText = `To: ${currentTarget.name}`;
 
@@ -132,21 +153,22 @@
 
                 ymaps.route([userCoords, targetPoint], {
                     multiRoute: true,
-                    routingMode: 'auto' // Set to 'pedestrian' if walking
+                    routingMode: 'auto'
                 }).done(
                     function (route) {
                         currentRoute = route;
                         
-                        // Customize look to look good on HUD
                         route.options.set({
-                            mapStateAutoApply: true, // Autofits the map frame to show the whole line
-                            routeActiveStrokeColor: "#00FFCC", // High contrast neon cyan line
-                            routeActiveStrokeWidth: 6
+                            mapStateAutoApply: true,
+                            routeActiveStrokeColor: "#00FFCC",
+                            routeActiveStrokeWidth: 6,
+                            // Turn off default markers that contain deep-links
+                            routeOpenBalloonOnClick: false,
+                            routeActivePedestrianSegmentStrokeColor: "#00FFCC"
                         });
 
                         map.geoObjects.add(currentRoute);
                         
-                        // Grab real time metadata from Yandex engine
                         let activeRoute = route.getActiveRoute();
                         if (activeRoute) {
                             let duration = activeRoute.properties.get("duration").text;
@@ -157,20 +179,16 @@
                     },
                     function (error) {
                         document.getElementById('main-status').innerText = "Routing Failed";
-                        document.getElementById('sub-status').innerText = "Could not map path to address.";
                     }
                 );
             }
         }
 
-        // Control mappings for glasses frame-taps / swipes
         window.addEventListener('keydown', function(event) {
             if (event.key === 'ArrowRight' || event.key === 'ArrowUp') {
-                // Cycle forward through targets
                 activeIndex = (activeIndex + 1) % destinations.length;
                 updateNavigation();
             } else if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') {
-                // Cycle backward through targets
                 activeIndex = (activeIndex - 1 + destinations.length) % destinations.length;
                 updateNavigation();
             }
