@@ -3,44 +3,55 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Glasses HUD - No Links</title>
+    <title>Glasses HUD</title>
     
     <script src="https://api-maps.yandex.ru/2.1/?lang=en_US" type="text/javascript"></script>
 
     <style>
+        * { -webkit-tap-highlight-color: transparent; }
+
         body, html {
             margin: 0;
             padding: 0;
             width: 600px;
             height: 600px;
-            background-color: #000000; 
+            background-color: #000000;
             color: #FFFFFF;
             font-family: Arial, sans-serif;
             overflow: hidden;
-            pointer-events: none; /* Prevents any touch/click actions entirely */
+            pointer-events: none;
         }
 
         #map {
             width: 600px;
             height: 520px;
             background-color: #000000;
+            pointer-events: none;
         }
 
-        /* Invert standard map layers to dark transparent HUD */
         .ymaps-2-1-79-map {
             filter: invert(100%) hue-rotate(180deg) brightness(100%) contrast(100%);
         }
 
-        /* Nuclear option: Force hide absolutely everything injected by Yandex layout */
-        [class*="ymaps"], [class*="balloon"], [class*="layer"], [class*="control"], [class*="button"] {
-            box-shadow: none !important;
-        }
-        
-        /* Hides the default routing panels and shortcut buttons */
-        .ymaps-2-1-79-route-panel, .ymaps-2-1-79-inside-sandbox, a,ymaps {
+        [class*="ymaps-2-1-79-copyright"],
+        [class*="ymaps-2-1-79-logo"],
+        [class*="ymaps-2-1-79-balloon"],
+        [class*="ymaps-2-1-79-route-panel"],
+        [class*="ymaps-2-1-79-inside-sandbox"],
+        [class*="ymaps-2-1-79-float-button"],
+        [class*="ymaps-2-1-79-controls"],
+        [class*="ymaps-2-1-79-map-copyrights-promo"],
+        [class*="_suggest"],
+        [class*="copyright"] {
             display: none !important;
             opacity: 0 !important;
             visibility: hidden !important;
+            pointer-events: none !important;
+        }
+
+        #map a {
+            pointer-events: none !important;
+            cursor: default !important;
         }
 
         #status-bar {
@@ -56,7 +67,7 @@
             flex-direction: column;
             justify-content: center;
         }
-        
+
         .sub-text {
             font-size: 14px;
             color: #aaaaaa;
@@ -73,8 +84,57 @@
     </div>
 
     <script type="text/javascript">
+        // 1) Kill ALL clicks on anchor tags anywhere on the page
+        document.addEventListener('click', function(e) {
+            const anchor = e.target.closest('a');
+            if (anchor) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                return false;
+            }
+        }, true);
+
+        // 2) MutationObserver: nuke any <a> tags Yandex injects into the map
+        const observer = new MutationObserver(function(mutations) {
+            mutations.forEach(function(mutation) {
+                mutation.addedNodes.forEach(function(node) {
+                    if (node.nodeType !== 1) return;
+                    const links = node.tagName === 'A'
+                        ? [node]
+                        : Array.from(node.querySelectorAll('a'));
+                    links.forEach(function(a) {
+                        a.removeAttribute('href');
+                        a.style.pointerEvents = 'none';
+                        a.style.cursor = 'default';
+                    });
+                    ['copyright', 'logo', 'balloon', 'float-button', 'copyrights-promo']
+                        .forEach(function(keyword) {
+                            if (node.className && typeof node.className === 'string' &&
+                                node.className.includes(keyword)) {
+                                node.style.display = 'none';
+                            }
+                            node.querySelectorAll('[class*="' + keyword + '"]').forEach(function(el) {
+                                el.style.display = 'none';
+                            });
+                        });
+                });
+            });
+        });
+
+        observer.observe(document.body, { childList: true, subtree: true });
+
+        // 3) Override window.open so Yandex can't open new tabs
+        window.open = function() { return null; };
+
+        window.addEventListener('beforeunload', function(e) {
+            e.preventDefault();
+            e.returnValue = '';
+        });
+
+        // MAP LOGIC
         let map;
-        let userCoords = [40.1792, 44.5152]; // Yerevan fallback
+        let userCoords = [40.1792, 44.5152];
         let activeIndex = 0;
         let polylineTrack = null;
 
@@ -85,16 +145,22 @@
         ];
 
         ymaps.ready(init);
+
         function init() {
-            // Initialize map with NO controls and click behavior completely disabled
             map = new ymaps.Map("map", {
                 center: userCoords,
                 zoom: 15,
                 controls: []
             }, {
-                suppressMapOpenBlock: true, // Disables the "Open in Yandex Maps" logo block
-                yandexMapDisablePoiInteractivity: true // Disables clicking on buildings/shops
+                suppressMapOpenBlock: true,
+                suppressObsoleteBrowserNotifier: true,
+                yandexMapDisablePoiInteractivity: true,
+                copyrightLogoVisible: false,
+                copyrightPromoVisible: false,
+                copyrightUaVisible: false
             });
+
+            map.behaviors.disable(['scrollZoom', 'drag', 'dblClickZoom', 'rightMouseButtonMagnifier', 'multiTouch']);
 
             trackLocation();
         }
@@ -102,11 +168,13 @@
         function trackLocation() {
             if (navigator.geolocation) {
                 navigator.geolocation.watchPosition(
-                    (position) => {
+                    function(position) {
                         userCoords = [position.coords.latitude, position.coords.longitude];
                         updateNavigation();
                     },
-                    (error) => { document.getElementById('main-status').innerText = "GPS Error"; },
+                    function() {
+                        document.getElementById('main-status').innerText = "GPS Error";
+                    },
                     { enableHighAccuracy: true, timeout: 10000 }
                 );
             }
@@ -115,7 +183,6 @@
         function updateNavigation() {
             const currentTarget = destinations[activeIndex];
 
-            // Safely clear old drawn geometric tracks
             if (polylineTrack) {
                 map.geoObjects.remove(polylineTrack);
                 polylineTrack = null;
@@ -124,20 +191,20 @@
             if (!currentTarget.address) {
                 map.setCenter(userCoords, 16);
                 document.getElementById('main-status').innerText = currentTarget.name;
-                document.getElementById('sub-status').innerText = "Swipe to cycle targets";
-                
-                // Draw a simple custom circle dot that has zero click functionality
+                document.getElementById('sub-status').innerText = "Press arrow keys to cycle targets";
+
                 polylineTrack = new ymaps.Circle([userCoords, 15], {}, {
-                    fillColor: "#FF3366", strokeWidth: 0, hasBalloon: false, interactive: false
+                    fillColor: "#FF3366",
+                    strokeWidth: 0,
+                    hasBalloon: false,
+                    interactive: false
                 });
                 map.geoObjects.add(polylineTrack);
             } else {
-                // Fetch raw routing lines without using Yandex's UI components
                 ymaps.route([userCoords, currentTarget.address], {
                     routingMode: 'auto'
                 }).done(
-                    function (res) {
-                        // Extract only the raw array of coordinates along the path
+                    function(res) {
                         let pathCoords = [];
                         let paths = res.getPaths();
                         for (let i = 0; i < paths.getLength(); i++) {
@@ -147,32 +214,29 @@
                             }
                         }
 
-                        // Draw a custom neon geometric line over the map
                         polylineTrack = new ymaps.Polyline(pathCoords, {}, {
                             strokeColor: "#00FFCC",
                             strokeWidth: 6,
                             hasBalloon: false,
-                            interactive: false // Makes the line unclickable
+                            interactive: false
                         });
 
                         map.geoObjects.add(polylineTrack);
                         map.setBounds(res.getBounds(), { checkZoomRange: true });
 
-                        // Extract time metrics
                         let duration = res.getPaths().get(0).getProperties().get("duration").text;
                         let distance = res.getPaths().get(0).getProperties().get("distance").text;
-                        
+
                         document.getElementById('main-status').innerText = currentTarget.name;
-                        document.getElementById('sub-status').innerText = `${duration} (${distance}) away`;
+                        document.getElementById('sub-status').innerText = duration + ' (' + distance + ') away';
                     },
-                    function (error) {
+                    function() {
                         document.getElementById('main-status').innerText = "Routing Failure";
                     }
                 );
             }
         }
 
-        // Control mappings for glasses gestures
         window.addEventListener('keydown', function(event) {
             if (event.key === 'ArrowRight' || event.key === 'ArrowUp') {
                 activeIndex = (activeIndex + 1) % destinations.length;
