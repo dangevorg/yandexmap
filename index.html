@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meta HUD - Controller Edition</title>
+    <title>Meta HUD Search Map</title>
     
     <script src="https://api-maps.yandex.ru/2.1/?lang=en_US" type="text/javascript"></script>
 
@@ -11,187 +11,93 @@
         body, html {
             margin: 0;
             padding: 0;
-            width: 100%;
-            height: 100%;
-            background-color: #000000; 
-            color: #00FFCC; 
-            font-family: -apple-system, BlinkMacSystemFont, Arial, sans-serif;
-            overflow-x: hidden;
-        }
-
-        #hidden-map { display: none !important; }
-
-        /* Input Control Panel - Visible on Phone, optimized for touch typing */
-        #phone-controls {
-            background-color: #111111;
-            padding: 20px;
-            box-sizing: border-box;
-            border-bottom: 2px solid #333333;
-            display: flex;
-            gap: 10px;
-        }
-
-        #search-input {
-            flex: 1;
-            padding: 15px;
-            font-size: 18px;
-            border: 1px solid #444444;
-            background-color: #222222;
-            color: #FFFFFF;
-            border-radius: 8px;
-        }
-
-        #start-btn {
-            padding: 15px 25px;
-            font-size: 18px;
-            font-weight: bold;
-            background-color: #00FFCC;
-            color: #000000;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-        }
-
-        /* Fixed 600x600 Display Frame for Glasses viewport rendering */
-        #hud-container {
             width: 600px;
-            height: 500px;
-            margin: 0 auto;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            align-items: center;
-            box-sizing: border-box;
-            padding: 20px;
-        }
-
-        #target-header {
-            font-size: 26px;
-            font-weight: 600;
+            height: 600px;
+            background-color: #000000;
             color: #FFFFFF;
-            text-align: center;
-            text-transform: uppercase;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
         }
 
-        #navigation-arrow {
-            font-size: 120px;
-            font-weight: bold;
-            margin: 10px 0;
-            text-shadow: 0 0 20px rgba(0, 255, 204, 0.6);
+        #map {
+            width: 600px;
+            height: 600px;
+            background-color: #000000;
         }
 
-        #instruction-text {
-            font-size: 28px;
-            font-weight: 500;
-            color: #FFFFFF;
-            text-align: center;
-            max-width: 500px;
-            height: 70px;
+        /* Inverts the map layout to high-contrast transparent dark mode for glasses */
+        .ymaps-2-1-79-map {
+            filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
         }
 
-        #metrics-panel {
-            width: 100%;
-            display: flex;
-            justify-content: space-around;
-            border-top: 2px solid #222222;
-            padding-top: 15px;
+        /* Forces the Yandex Search Box UI to scale massive so you can easily type on it */
+        .ymaps-2-1-79-searchbox {
+            width: 560px !important;
+            height: 60px !important;
+            margin: 20px !important;
         }
-
-        .metric-box { text-align: center; }
-        .metric-value { font-size: 32px; font-weight: bold; color: #00FFCC; }
-        .metric-label { font-size: 14px; color: #888888; text-transform: uppercase; }
+        .ymaps-2-1-79-searchbox-input__input {
+            font-size: 24px !important;
+            height: 45px !important;
+        }
     </style>
 </head>
 <body>
 
-    <div id="phone-controls">
-        <input type="text" id="search-input" placeholder="Enter destination (e.g. Northern Ave)...">
-        <button id="start-btn" onclick="startNavigation()">Start Route</button>
-    </div>
-
-    <div id="hidden-map"></div>
-
-    <div id="hud-container">
-        <div id="target-header">System Ready</div>
-        <div id="navigation-arrow">▲</div>
-        <div id="instruction-text">Type a destination above to begin routing</div>
-        
-        <div id="metrics-panel">
-            <div class="metric-box">
-                <div id="metric-dist" class="metric-value">--</div>
-                <div class="metric-label">Distance</div>
-            </div>
-            <div class="metric-box">
-                <div id="metric-time" class="metric-value">--</div>
-                <div class="metric-label">Remaining</div>
-            </div>
-        </div>
-    </div>
+    <div id="map"></div>
 
     <script type="text/javascript">
-        let userCoords = [40.1792, 44.5152]; // Yerevan fallback
-        let targetDestination = "";
+        let map;
+        let userCoords = [40.1792, 44.5152]; // Yerevan Default Fallback
 
         ymaps.ready(init);
         function init() {
-            trackLocation();
-        }
+            // Re-enabling the 'searchControl' inside the map array framework
+            map = new ymaps.Map("map", {
+                center: userCoords,
+                zoom: 14,
+                controls: ['searchControl'] 
+            }, {
+                suppressMapOpenBlock: true
+            });
 
-        function trackLocation() {
+            // Trigger phone GPS coordinates lookup
             if (navigator.geolocation) {
-                navigator.geolocation.watchPosition(
-                    (position) => {
-                        userCoords = [position.coords.latitude, position.coords.longitude];
-                        if (targetDestination) {
-                            calculateRoute();
-                        }
-                    },
-                    (error) => { document.getElementById('instruction-text').innerText = "GPS Error. Check phone settings."; },
-                    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-                );
+                navigator.geolocation.getCurrentPosition((position) => {
+                    userCoords = [position.coords.latitude, position.coords.longitude];
+                    map.setCenter(userCoords, 15);
+                    
+                    // Put a flashing tracker mark at your exact feet location
+                    let locationMarker = new ymaps.Placemark(userCoords, {}, {
+                        preset: 'islands#violetDotIconWithCaption'
+                    });
+                    map.geoObjects.add(locationMarker);
+                });
             }
-        }
 
-        function startNavigation() {
-            const inputVal = document.getElementById('search-input').value.trim();
-            if (!inputVal) return;
-            
-            targetDestination = inputVal;
-            document.getElementById('instruction-text').innerText = "Calculating path...";
-            calculateRoute();
-        }
-
-        function calculateRoute() {
-            ymaps.route([userCoords, targetDestination], {
-                routingMode: 'pedestrian'
-            }).done(
-                function (res) {
-                    document.getElementById('target-header').innerText = `To: ${targetDestination}`;
+            // Monitor search bar entries: Once you type a location, draw a route automatically
+            let searchControl = map.controls.get('searchControl');
+            searchControl.events.add('resultselect', function (e) {
+                let index = e.get('index');
+                searchControl.getResult(index).then(function (res) {
+                    let destinationCoords = res.geometry.getCoordinates();
                     
-                    let path = res.getPaths().get(0);
-                    let duration = path.getProperties().get("duration").text;
-                    let distance = path.getProperties().get("distance").text;
-                    
-                    document.getElementById('metric-dist').innerText = distance;
-                    document.getElementById('metric-time').innerText = duration;
+                    // Wipe clean old trails
+                    map.geoObjects.removeAll();
 
-                    let segments = path.getSegments();
-                    if (segments.getLength() > 0) {
-                        let actionText = segments.get(0).getProperties().get("text");
-                        let actionType = segments.get(0).getProperties().get("action");
-                        
-                        document.getElementById('instruction-text').innerText = actionText.replace(/<\/?[^>]+(>|$)/g, "");
-
-                        let arrow = document.getElementById('navigation-arrow');
-                        if (actionType === "left") arrow.innerText = "◀";
-                        else if (actionType === "right") arrow.innerText = "▶";
-                        else arrow.innerText = "▲";
-                    }
-                },
-                function (error) {
-                    document.getElementById('instruction-text').innerText = "Location unknown. Try a clearer address.";
-                }
-            );
+                    // Calculate the active pedestrian routing path
+                    ymaps.route([userCoords, destinationCoords], {
+                        routingMode: 'pedestrian'
+                    }).done(function (route) {
+                        route.options.set({
+                            mapStateAutoApply: true,
+                            routeActiveStrokeColor: "#00FFCC", // High visibility neon line
+                            routeActiveStrokeWidth: 7
+                        });
+                        map.geoObjects.add(route);
+                    });
+                });
+            });
         }
     </script>
 </body>
