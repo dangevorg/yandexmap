@@ -23,24 +23,13 @@
             width: 600px;
             height: 520px;
             background-color: #000000;
+            /* CRITICAL: Disables ALL touch and click inputs on the map itself so it never redirects */
+            pointer-events: none !important; 
         }
 
         /* High-contrast smart overlay for HUD transparent lens */
         .ymaps-2-1-79-map {
             filter: invert(100%) hue-rotate(180deg) brightness(100%) contrast(100%);
-        }
-
-        /* CRITICAL: Hide all popups, balloons, and routing control panels that contain external links */
-        .ymaps-2-1-79-balloon, 
-        .ymaps-2-1-79-route-panel, 
-        .ymaps-2-1-79-copyright, 
-        .ymaps-2-1-79-map-links,
-        [class*="balloon"], 
-        [class*="links"], 
-        [class*="route-panel"] {
-            display: none !important;
-            visibility: hidden !important;
-            pointer-events: none !important;
         }
 
         #status-bar {
@@ -75,27 +64,14 @@
     <script type="text/javascript">
         let map;
         let currentRoute = null;
-        let userCoords = [40.1792, 44.5152]; // Default fallback location
+        let userCoords = [40.1792, 44.5152]; // Yerevan default fallback
         
         const destinations = [
             { name: "My Current Position Only", coords: null },
-            { name: "Heading: Home/Republic Square", address: "Yerevan, Republic Square" },
-            { name: "Heading: Work / Cascade Complex", address: "Yerevan, Cascade" }
+            { name: "Heading: Republic Square", address: "Yerevan, Republic Square" },
+            { name: "Heading: Cascade Complex", address: "Yerevan, Cascade" }
         ];
         let activeIndex = 0;
-
-        // Force lock all link clicks inside the web view sandbox
-        document.addEventListener('click', function(e) {
-            let target = e.target;
-            while (target && target !== document) {
-                if (target.tagName === 'A' || target.getAttribute('href')) {
-                    e.preventDefault(); // Stop the link from opening outside
-                    e.stopPropagation();
-                    return false;
-                }
-                target = target.parentNode;
-            }
-        }, true);
 
         ymaps.ready(init);
         function init() {
@@ -117,12 +93,9 @@
                     },
                     (error) => {
                         document.getElementById('main-status').innerText = "GPS Error";
-                        document.getElementById('sub-status').innerText = "Make sure phone allows location.";
                     },
                     { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
                 );
-            } else {
-                document.getElementById('main-status').innerText = "GPS Unusable";
             }
         }
 
@@ -137,18 +110,17 @@
             if (!currentTarget.coords && !currentTarget.address) {
                 map.setCenter(userCoords, 16);
                 document.getElementById('main-status').innerText = "Tracking Position";
-                document.getElementById('sub-status').innerText = "Tap/Swipe Left/Right to choose destination";
+                document.getElementById('sub-status').innerText = "Swipe frame to toggle presets";
                 
                 let singlePlacemark = new ymaps.Placemark(userCoords, {}, { 
                     preset: 'islands#redCircleDotIcon',
-                    hasBalloon: false // Completely blocks popups on click
+                    hasBalloon: false
                 });
                 currentRoute = singlePlacemark;
                 map.geoObjects.add(singlePlacemark);
             } else {
                 document.getElementById('main-status').innerText = "Calculating Route...";
-                document.getElementById('sub-status').innerText = `To: ${currentTarget.name}`;
-
+                
                 let targetPoint = currentTarget.coords ? currentTarget.coords : currentTarget.address;
 
                 ymaps.route([userCoords, targetPoint], {
@@ -162,9 +134,10 @@
                             mapStateAutoApply: true,
                             routeActiveStrokeColor: "#00FFCC",
                             routeActiveStrokeWidth: 6,
-                            // Turn off default markers that contain deep-links
                             routeOpenBalloonOnClick: false,
-                            routeActivePedestrianSegmentStrokeColor: "#00FFCC"
+                            // Block any internal route markers from generating popups
+                            wayPointOpenBalloonOnClick: false,
+                            viaPointOpenBalloonOnClick: false
                         });
 
                         map.geoObjects.add(currentRoute);
@@ -184,6 +157,7 @@
             }
         }
 
+        // Cycle targets only using glasses gestures (Arrow Keys)
         window.addEventListener('keydown', function(event) {
             if (event.key === 'ArrowRight' || event.key === 'ArrowUp') {
                 activeIndex = (activeIndex + 1) % destinations.length;
