@@ -3,256 +3,208 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Glasses HUD</title>
-
+    <title>Meta HUD Navigator + Voice</title>
+    
     <script src="https://api-maps.yandex.ru/2.1/?lang=en_US" type="text/javascript"></script>
 
     <style>
-        * {
-            -webkit-tap-highlight-color: transparent;
-            box-sizing: border-box;
-        }
-
         body, html {
             margin: 0;
             padding: 0;
             width: 600px;
             height: 600px;
-            background-color: #000000;
-            color: #FFFFFF;
-            font-family: Arial, sans-serif;
+            background-color: #000000; 
+            color: #00FFCC; 
+            font-family: -apple-system, BlinkMacSystemFont, Arial, sans-serif;
             overflow: hidden;
-            /* DO NOT set pointer-events:none on body — it breaks tile loading */
+            pointer-events: none; 
         }
 
-        #map {
+        #hidden-map { display: none !important; }
+
+        #hud-container {
             width: 600px;
-            height: 520px;
-            background-color: #111;
-            /* DO NOT set pointer-events:none here either */
-        }
-
-        /* Apply dark HUD filter to the map canvas using a universal selector
-           so it works regardless of the ymaps version number in the class */
-        #map canvas,
-        #map img,
-        #map [class*="ground-pane"],
-        #map [class*="tiles"] {
-            filter: invert(100%) hue-rotate(180deg) brightness(90%) contrast(90%);
-        }
-
-        /* Hide all Yandex UI overlays — use wildcard so version number doesn't matter */
-        [class*="copyright"],
-        [class*="-logo"],
-        [class*="balloon"],
-        [class*="route-panel"],
-        [class*="inside-sandbox"],
-        [class*="float-button"],
-        [class*="map-copyrights"],
-        [class*="controls__toolbar"],
-        [class*="zoom"],
-        [class*="suggest"],
-        [class*="search"] {
-            display: none !important;
-            opacity: 0 !important;
-            visibility: hidden !important;
-            pointer-events: none !important;
-        }
-
-        #status-bar {
-            height: 80px;
-            padding: 10px;
-            text-align: center;
-            font-size: 20px;
-            font-weight: bold;
-            background-color: #111111;
-            border-top: 2px solid #333333;
+            height: 600px;
             display: flex;
             flex-direction: column;
-            justify-content: center;
+            justify-content: space-between;
+            align-items: center;
+            box-sizing: border-box;
+            padding: 40px 20px;
+            transition: background-color 0.3s ease;
         }
 
-        .sub-text {
-            font-size: 14px;
-            color: #aaaaaa;
-            margin-top: 4px;
+        /* Changes layout color state when microphone turns on */
+        .listening-mode {
+            background-color: #330000 !important; 
+            color: #FF3333 !important;
         }
+
+        #target-header {
+            font-size: 28px;
+            font-weight: 600;
+            color: #FFFFFF;
+            text-align: center;
+            text-transform: uppercase;
+        }
+
+        #navigation-arrow {
+            font-size: 140px;
+            font-weight: bold;
+            margin: 20px 0;
+            text-shadow: 0 0 20px rgba(0, 255, 204, 0.6);
+        }
+
+        #instruction-text {
+            font-size: 32px;
+            font-weight: 500;
+            color: #FFFFFF;
+            text-align: center;
+            max-width: 500px;
+            height: 80px;
+        }
+
+        #metrics-panel {
+            width: 100%;
+            display: flex;
+            justify-content: space-around;
+            border-top: 2px solid #222222;
+            padding-top: 20px;
+        }
+
+        .metric-box { text-align: center; }
+        .metric-value { font-size: 36px; font-weight: bold; color: #00FFCC; }
+        .metric-label { font-size: 16px; color: #888888; text-transform: uppercase; }
     </style>
 </head>
 <body>
 
-    <div id="map"></div>
-    <div id="status-bar">
-        <div id="main-status">Initializing HUD...</div>
-        <div id="sub-status" class="sub-text">Waiting for GPS...</div>
+    <div id="hidden-map"></div>
+
+    <div id="hud-container">
+        <div id="target-header">HUD ACTIVE</div>
+        <div id="navigation-arrow">▲</div>
+        <div id="instruction-text">Tap Glasses Button to Dictate Address</div>
+        
+        <div id="metrics-panel">
+            <div class="metric-box">
+                <div id="metric-dist" class="metric-value">--</div>
+                <div class="metric-label">Distance</div>
+            </div>
+            <div class="metric-box">
+                <div id="metric-time" class="metric-value">--</div>
+                <div class="metric-label">Remaining</div>
+            </div>
+        </div>
     </div>
 
     <script type="text/javascript">
-
-        // ── ANTI-REDIRECT: block ALL anchor clicks before they fire ──────────
-        document.addEventListener('click', function(e) {
-            var anchor = e.target.closest('a');
-            if (anchor) {
-                e.preventDefault();
-                e.stopPropagation();
-                e.stopImmediatePropagation();
-            }
-        }, true); // capture phase = fires before Yandex handlers
-
-        // ── MUTATION OBSERVER: strip hrefs from any links Yandex injects ─────
-        var observer = new MutationObserver(function(mutations) {
-            mutations.forEach(function(mutation) {
-                mutation.addedNodes.forEach(function(node) {
-                    if (node.nodeType !== 1) return;
-                    var links = node.tagName === 'A' ? [node] : Array.from(node.querySelectorAll('a'));
-                    links.forEach(function(a) {
-                        a.removeAttribute('href');
-                        a.style.pointerEvents = 'none';
-                        a.style.cursor = 'default';
-                    });
-                });
-            });
-        });
-        observer.observe(document.body, { childList: true, subtree: true });
-
-        // ── BLOCK window.open (Yandex sometimes uses this to redirect) ───────
-        window.open = function() { return null; };
-
-        // ── MAP SETUP ────────────────────────────────────────────────────────
-        var map;
-        var userCoords = [40.1792, 44.5152]; // Yerevan fallback
-        var activeIndex = 0;
-        var polylineTrack = null;
-
-        var destinations = [
-            { name: "Tracking Your Position", address: null },
-            { name: "Heading: Republic Square", address: "Yerevan, Republic Square" },
-            { name: "Heading: Cascade Complex", address: "Yerevan, Cascade" }
-        ];
+        let userCoords = [40.1792, 44.5152]; // Yerevan fallback
+        let recognition;
+        let isListening = false;
 
         ymaps.ready(init);
-
         function init() {
-            map = new ymaps.Map("map", {
-                center: userCoords,
-                zoom: 15,
-                controls: []  // no built-in controls at all
-            }, {
-                suppressMapOpenBlock: true,          // hides "Open in Yandex Maps" block
-                suppressObsoleteBrowserNotifier: true,
-                yandexMapDisablePoiInteractivity: true, // no popups on POIs
-                copyrightLogoVisible: false,
-                copyrightPromoVisible: false,
-                copyrightUaVisible: false
-            });
-
-            // Disable all interactive behaviors — glasses use key events only
-            map.behaviors.disable([
-                'scrollZoom',
-                'drag',
-                'dblClickZoom',
-                'rightMouseButtonMagnifier',
-                'multiTouch',
-                'leftMouseButtonMagnifier'
-            ]);
-
-            document.getElementById('main-status').innerText = "GPS Acquiring...";
+            setupVoiceRecognition();
             trackLocation();
         }
 
         function trackLocation() {
-            if (!navigator.geolocation) {
-                document.getElementById('main-status').innerText = "No GPS Support";
-                return;
-            }
-            navigator.geolocation.watchPosition(
-                function(position) {
-                    userCoords = [position.coords.latitude, position.coords.longitude];
-                    updateNavigation();
-                },
-                function(err) {
-                    document.getElementById('main-status').innerText = "GPS Error: " + err.message;
-                    // Still show map at fallback coords
-                    updateNavigation();
-                },
-                { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
-            );
-        }
-
-        function updateNavigation() {
-            var currentTarget = destinations[activeIndex];
-
-            if (polylineTrack) {
-                map.geoObjects.remove(polylineTrack);
-                polylineTrack = null;
-            }
-
-            if (!currentTarget.address) {
-                // Just show current position
-                map.setCenter(userCoords, 16);
-                document.getElementById('main-status').innerText = currentTarget.name;
-                document.getElementById('sub-status').innerText = "Arrow keys to cycle targets";
-
-                polylineTrack = new ymaps.Circle([userCoords, 15], {}, {
-                    fillColor: "#FF3366",
-                    strokeWidth: 0,
-                    hasBalloon: false,
-                    interactive: false
-                });
-                map.geoObjects.add(polylineTrack);
-
-            } else {
-                document.getElementById('main-status').innerText = "Routing...";
-                document.getElementById('sub-status').innerText = currentTarget.name;
-
-                ymaps.route([userCoords, currentTarget.address], {
-                    routingMode: 'auto'
-                }).done(
-                    function(res) {
-                        var pathCoords = [];
-                        var paths = res.getPaths();
-                        for (var i = 0; i < paths.getLength(); i++) {
-                            var segments = paths.get(i).getSegments();
-                            for (var j = 0; j < segments.getLength(); j++) {
-                                pathCoords = pathCoords.concat(segments.get(j).getCoordinates());
-                            }
-                        }
-
-                        polylineTrack = new ymaps.Polyline(pathCoords, {}, {
-                            strokeColor: "#00FFCC",
-                            strokeWidth: 6,
-                            hasBalloon: false,
-                            interactive: false
-                        });
-
-                        map.geoObjects.add(polylineTrack);
-                        map.setBounds(res.getBounds(), { checkZoomRange: true });
-
-                        var duration = res.getPaths().get(0).getProperties().get("duration").text;
-                        var distance = res.getPaths().get(0).getProperties().get("distance").text;
-
-                        document.getElementById('main-status').innerText = currentTarget.name;
-                        document.getElementById('sub-status').innerText = duration + " — " + distance;
+            if (navigator.geolocation) {
+                navigator.geolocation.watchPosition(
+                    (position) => {
+                        userCoords = [position.coords.latitude, position.coords.longitude];
                     },
-                    function(err) {
-                        document.getElementById('main-status').innerText = "Routing Failed";
-                        document.getElementById('sub-status').innerText = "Check connection";
-                    }
+                    (error) => { console.log("GPS error"); },
+                    { enableHighAccuracy: true, timeout: 10000 }
                 );
             }
         }
 
-        // ── GLASSES GESTURE CONTROLS (mapped to arrow keys for testing) ──────
+        // Initialize Web Speech Engine
+        function setupVoiceRecognition() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                document.getElementById('instruction-text').innerText = "Voice Dictation Not Supported";
+                return;
+            }
+
+            recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.lang = 'en-US'; // Change to your preferred language code if needed
+            recognition.interimResults = false;
+
+            recognition.onstart = () => {
+                isListening = true;
+                document.getElementById('hud-container').classList.add('listening-mode');
+                document.getElementById('target-header').innerText = "LISTENING...";
+                document.getElementById('instruction-text').innerText = "Speak your destination now...";
+            };
+
+            recognition.onerror = (e) => {
+                resetHUDLayout();
+                document.getElementById('instruction-text').innerText = "Voice Error. Try Again.";
+            };
+
+            recognition.onend = () => {
+                resetHUDLayout();
+            };
+
+            recognition.onresult = (event) => {
+                const spokenText = event.results[0][0].transcript;
+                calculateVoiceRoute(spokenText);
+            };
+        }
+
+        function resetHUDLayout() {
+            isListening = false;
+            document.getElementById('hud-container').classList.remove('listening-mode');
+            document.getElementById('target-header').innerText = "HUD ACTIVE";
+        }
+
+        function calculateVoiceRoute(targetAddress) {
+            document.getElementById('instruction-text').innerText = "Mapping destination...";
+            
+            ymaps.route([userCoords, targetAddress], {
+                routingMode: 'pedestrian'
+            }).done(
+                function (res) {
+                    document.getElementById('target-header').innerText = targetAddress;
+                    
+                    let path = res.getPaths().get(0);
+                    let duration = path.getProperties().get("duration").text;
+                    let distance = path.getProperties().get("distance").text;
+                    
+                    document.getElementById('metric-dist').innerText = distance;
+                    document.getElementById('metric-time').innerText = duration;
+
+                    let segments = path.getSegments();
+                    if (segments.getLength() > 0) {
+                        let actionText = segments.get(0).getProperties().get("text");
+                        let actionType = segments.get(0).getProperties().get("action");
+                        
+                        document.getElementById('instruction-text').innerText = actionText.replace(/<\/?[^>]+(>|$)/g, "");
+
+                        let arrow = document.getElementById('navigation-arrow');
+                        if (actionType === "left") arrow.innerText = "◀";
+                        else if (actionType === "right") arrow.innerText = "▶";
+                        else arrow.innerText = "▲";
+                    }
+                },
+                function (error) {
+                    document.getElementById('instruction-text').innerText = "Address not found. Tap to retry.";
+                }
+            );
+        }
+
+        // Map the physical glasses touch click (Enter Key) to trigger the microphone toggle
         window.addEventListener('keydown', function(event) {
-            if (event.key === 'ArrowRight' || event.key === 'ArrowUp') {
-                activeIndex = (activeIndex + 1) % destinations.length;
-                updateNavigation();
-            } else if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') {
-                activeIndex = (activeIndex - 1 + destinations.length) % destinations.length;
-                updateNavigation();
+            if (event.key === 'Enter') {
+                if (!isListening && recognition) {
+                    recognition.start();
+                }
             }
         });
-
     </script>
 </body>
 </html>
