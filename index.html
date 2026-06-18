@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meta HUD Navigator + Voice</title>
+    <title>Meta HUD - Controller Edition</title>
     
     <script src="https://api-maps.yandex.ru/2.1/?lang=en_US" type="text/javascript"></script>
 
@@ -11,37 +11,62 @@
         body, html {
             margin: 0;
             padding: 0;
-            width: 600px;
-            height: 600px;
+            width: 100%;
+            height: 100%;
             background-color: #000000; 
             color: #00FFCC; 
             font-family: -apple-system, BlinkMacSystemFont, Arial, sans-serif;
-            overflow: hidden;
-            pointer-events: none; 
+            overflow-x: hidden;
         }
 
         #hidden-map { display: none !important; }
 
+        /* Input Control Panel - Visible on Phone, optimized for touch typing */
+        #phone-controls {
+            background-color: #111111;
+            padding: 20px;
+            box-sizing: border-box;
+            border-bottom: 2px solid #333333;
+            display: flex;
+            gap: 10px;
+        }
+
+        #search-input {
+            flex: 1;
+            padding: 15px;
+            font-size: 18px;
+            border: 1px solid #444444;
+            background-color: #222222;
+            color: #FFFFFF;
+            border-radius: 8px;
+        }
+
+        #start-btn {
+            padding: 15px 25px;
+            font-size: 18px;
+            font-weight: bold;
+            background-color: #00FFCC;
+            color: #000000;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+
+        /* Fixed 600x600 Display Frame for Glasses viewport rendering */
         #hud-container {
             width: 600px;
-            height: 600px;
+            height: 500px;
+            margin: 0 auto;
             display: flex;
             flex-direction: column;
             justify-content: space-between;
             align-items: center;
             box-sizing: border-box;
-            padding: 40px 20px;
-            transition: background-color 0.3s ease;
-        }
-
-        /* Changes layout color state when microphone turns on */
-        .listening-mode {
-            background-color: #330000 !important; 
-            color: #FF3333 !important;
+            padding: 20px;
         }
 
         #target-header {
-            font-size: 28px;
+            font-size: 26px;
             font-weight: 600;
             color: #FFFFFF;
             text-align: center;
@@ -49,19 +74,19 @@
         }
 
         #navigation-arrow {
-            font-size: 140px;
+            font-size: 120px;
             font-weight: bold;
-            margin: 20px 0;
+            margin: 10px 0;
             text-shadow: 0 0 20px rgba(0, 255, 204, 0.6);
         }
 
         #instruction-text {
-            font-size: 32px;
+            font-size: 28px;
             font-weight: 500;
             color: #FFFFFF;
             text-align: center;
             max-width: 500px;
-            height: 80px;
+            height: 70px;
         }
 
         #metrics-panel {
@@ -69,22 +94,27 @@
             display: flex;
             justify-content: space-around;
             border-top: 2px solid #222222;
-            padding-top: 20px;
+            padding-top: 15px;
         }
 
         .metric-box { text-align: center; }
-        .metric-value { font-size: 36px; font-weight: bold; color: #00FFCC; }
-        .metric-label { font-size: 16px; color: #888888; text-transform: uppercase; }
+        .metric-value { font-size: 32px; font-weight: bold; color: #00FFCC; }
+        .metric-label { font-size: 14px; color: #888888; text-transform: uppercase; }
     </style>
 </head>
 <body>
 
+    <div id="phone-controls">
+        <input type="text" id="search-input" placeholder="Enter destination (e.g. Northern Ave)...">
+        <button id="start-btn" onclick="startNavigation()">Start Route</button>
+    </div>
+
     <div id="hidden-map"></div>
 
     <div id="hud-container">
-        <div id="target-header">HUD ACTIVE</div>
+        <div id="target-header">System Ready</div>
         <div id="navigation-arrow">▲</div>
-        <div id="instruction-text">Tap Glasses Button to Dictate Address</div>
+        <div id="instruction-text">Type a destination above to begin routing</div>
         
         <div id="metrics-panel">
             <div class="metric-box">
@@ -100,12 +130,10 @@
 
     <script type="text/javascript">
         let userCoords = [40.1792, 44.5152]; // Yerevan fallback
-        let recognition;
-        let isListening = false;
+        let targetDestination = "";
 
         ymaps.ready(init);
         function init() {
-            setupVoiceRecognition();
             trackLocation();
         }
 
@@ -114,62 +142,31 @@
                 navigator.geolocation.watchPosition(
                     (position) => {
                         userCoords = [position.coords.latitude, position.coords.longitude];
+                        if (targetDestination) {
+                            calculateRoute();
+                        }
                     },
-                    (error) => { console.log("GPS error"); },
-                    { enableHighAccuracy: true, timeout: 10000 }
+                    (error) => { document.getElementById('instruction-text').innerText = "GPS Error. Check phone settings."; },
+                    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
                 );
             }
         }
 
-        // Initialize Web Speech Engine
-        function setupVoiceRecognition() {
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            if (!SpeechRecognition) {
-                document.getElementById('instruction-text').innerText = "Voice Dictation Not Supported";
-                return;
-            }
-
-            recognition = new SpeechRecognition();
-            recognition.continuous = false;
-            recognition.lang = 'en-US'; // Change to your preferred language code if needed
-            recognition.interimResults = false;
-
-            recognition.onstart = () => {
-                isListening = true;
-                document.getElementById('hud-container').classList.add('listening-mode');
-                document.getElementById('target-header').innerText = "LISTENING...";
-                document.getElementById('instruction-text').innerText = "Speak your destination now...";
-            };
-
-            recognition.onerror = (e) => {
-                resetHUDLayout();
-                document.getElementById('instruction-text').innerText = "Voice Error. Try Again.";
-            };
-
-            recognition.onend = () => {
-                resetHUDLayout();
-            };
-
-            recognition.onresult = (event) => {
-                const spokenText = event.results[0][0].transcript;
-                calculateVoiceRoute(spokenText);
-            };
-        }
-
-        function resetHUDLayout() {
-            isListening = false;
-            document.getElementById('hud-container').classList.remove('listening-mode');
-            document.getElementById('target-header').innerText = "HUD ACTIVE";
-        }
-
-        function calculateVoiceRoute(targetAddress) {
-            document.getElementById('instruction-text').innerText = "Mapping destination...";
+        function startNavigation() {
+            const inputVal = document.getElementById('search-input').value.trim();
+            if (!inputVal) return;
             
-            ymaps.route([userCoords, targetAddress], {
+            targetDestination = inputVal;
+            document.getElementById('instruction-text').innerText = "Calculating path...";
+            calculateRoute();
+        }
+
+        function calculateRoute() {
+            ymaps.route([userCoords, targetDestination], {
                 routingMode: 'pedestrian'
             }).done(
                 function (res) {
-                    document.getElementById('target-header').innerText = targetAddress;
+                    document.getElementById('target-header').innerText = `To: ${targetDestination}`;
                     
                     let path = res.getPaths().get(0);
                     let duration = path.getProperties().get("duration").text;
@@ -192,19 +189,10 @@
                     }
                 },
                 function (error) {
-                    document.getElementById('instruction-text').innerText = "Address not found. Tap to retry.";
+                    document.getElementById('instruction-text').innerText = "Location unknown. Try a clearer address.";
                 }
             );
         }
-
-        // Map the physical glasses touch click (Enter Key) to trigger the microphone toggle
-        window.addEventListener('keydown', function(event) {
-            if (event.key === 'Enter') {
-                if (!isListening && recognition) {
-                    recognition.start();
-                }
-            }
-        });
     </script>
 </body>
 </html>
