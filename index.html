@@ -4,11 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Glasses HUD</title>
-    
+
     <script src="https://api-maps.yandex.ru/2.1/?lang=en_US" type="text/javascript"></script>
 
     <style>
-        * { -webkit-tap-highlight-color: transparent; }
+        * {
+            -webkit-tap-highlight-color: transparent;
+            box-sizing: border-box;
+        }
 
         body, html {
             margin: 0;
@@ -19,44 +22,45 @@
             color: #FFFFFF;
             font-family: Arial, sans-serif;
             overflow: hidden;
-            pointer-events: none;
+            /* DO NOT set pointer-events:none on body — it breaks tile loading */
         }
 
         #map {
             width: 600px;
             height: 520px;
-            background-color: #000000;
-            pointer-events: none;
+            background-color: #111;
+            /* DO NOT set pointer-events:none here either */
         }
 
-        .ymaps-2-1-79-map {
-            filter: invert(100%) hue-rotate(180deg) brightness(100%) contrast(100%);
+        /* Apply dark HUD filter to the map canvas using a universal selector
+           so it works regardless of the ymaps version number in the class */
+        #map canvas,
+        #map img,
+        #map [class*="ground-pane"],
+        #map [class*="tiles"] {
+            filter: invert(100%) hue-rotate(180deg) brightness(90%) contrast(90%);
         }
 
-        [class*="ymaps-2-1-79-copyright"],
-        [class*="ymaps-2-1-79-logo"],
-        [class*="ymaps-2-1-79-balloon"],
-        [class*="ymaps-2-1-79-route-panel"],
-        [class*="ymaps-2-1-79-inside-sandbox"],
-        [class*="ymaps-2-1-79-float-button"],
-        [class*="ymaps-2-1-79-controls"],
-        [class*="ymaps-2-1-79-map-copyrights-promo"],
-        [class*="_suggest"],
-        [class*="copyright"] {
+        /* Hide all Yandex UI overlays — use wildcard so version number doesn't matter */
+        [class*="copyright"],
+        [class*="-logo"],
+        [class*="balloon"],
+        [class*="route-panel"],
+        [class*="inside-sandbox"],
+        [class*="float-button"],
+        [class*="map-copyrights"],
+        [class*="controls__toolbar"],
+        [class*="zoom"],
+        [class*="suggest"],
+        [class*="search"] {
             display: none !important;
             opacity: 0 !important;
             visibility: hidden !important;
             pointer-events: none !important;
         }
 
-        #map a {
-            pointer-events: none !important;
-            cursor: default !important;
-        }
-
         #status-bar {
             height: 80px;
-            box-sizing: border-box;
             padding: 10px;
             text-align: center;
             font-size: 20px;
@@ -84,61 +88,43 @@
     </div>
 
     <script type="text/javascript">
-        // 1) Kill ALL clicks on anchor tags anywhere on the page
+
+        // ── ANTI-REDIRECT: block ALL anchor clicks before they fire ──────────
         document.addEventListener('click', function(e) {
-            const anchor = e.target.closest('a');
+            var anchor = e.target.closest('a');
             if (anchor) {
                 e.preventDefault();
                 e.stopPropagation();
                 e.stopImmediatePropagation();
-                return false;
             }
-        }, true);
+        }, true); // capture phase = fires before Yandex handlers
 
-        // 2) MutationObserver: nuke any <a> tags Yandex injects into the map
-        const observer = new MutationObserver(function(mutations) {
+        // ── MUTATION OBSERVER: strip hrefs from any links Yandex injects ─────
+        var observer = new MutationObserver(function(mutations) {
             mutations.forEach(function(mutation) {
                 mutation.addedNodes.forEach(function(node) {
                     if (node.nodeType !== 1) return;
-                    const links = node.tagName === 'A'
-                        ? [node]
-                        : Array.from(node.querySelectorAll('a'));
+                    var links = node.tagName === 'A' ? [node] : Array.from(node.querySelectorAll('a'));
                     links.forEach(function(a) {
                         a.removeAttribute('href');
                         a.style.pointerEvents = 'none';
                         a.style.cursor = 'default';
                     });
-                    ['copyright', 'logo', 'balloon', 'float-button', 'copyrights-promo']
-                        .forEach(function(keyword) {
-                            if (node.className && typeof node.className === 'string' &&
-                                node.className.includes(keyword)) {
-                                node.style.display = 'none';
-                            }
-                            node.querySelectorAll('[class*="' + keyword + '"]').forEach(function(el) {
-                                el.style.display = 'none';
-                            });
-                        });
                 });
             });
         });
-
         observer.observe(document.body, { childList: true, subtree: true });
 
-        // 3) Override window.open so Yandex can't open new tabs
+        // ── BLOCK window.open (Yandex sometimes uses this to redirect) ───────
         window.open = function() { return null; };
 
-        window.addEventListener('beforeunload', function(e) {
-            e.preventDefault();
-            e.returnValue = '';
-        });
+        // ── MAP SETUP ────────────────────────────────────────────────────────
+        var map;
+        var userCoords = [40.1792, 44.5152]; // Yerevan fallback
+        var activeIndex = 0;
+        var polylineTrack = null;
 
-        // MAP LOGIC
-        let map;
-        let userCoords = [40.1792, 44.5152];
-        let activeIndex = 0;
-        let polylineTrack = null;
-
-        const destinations = [
+        var destinations = [
             { name: "Tracking Your Position", address: null },
             { name: "Heading: Republic Square", address: "Yerevan, Republic Square" },
             { name: "Heading: Cascade Complex", address: "Yerevan, Cascade" }
@@ -150,38 +136,51 @@
             map = new ymaps.Map("map", {
                 center: userCoords,
                 zoom: 15,
-                controls: []
+                controls: []  // no built-in controls at all
             }, {
-                suppressMapOpenBlock: true,
+                suppressMapOpenBlock: true,          // hides "Open in Yandex Maps" block
                 suppressObsoleteBrowserNotifier: true,
-                yandexMapDisablePoiInteractivity: true,
+                yandexMapDisablePoiInteractivity: true, // no popups on POIs
                 copyrightLogoVisible: false,
                 copyrightPromoVisible: false,
                 copyrightUaVisible: false
             });
 
-            map.behaviors.disable(['scrollZoom', 'drag', 'dblClickZoom', 'rightMouseButtonMagnifier', 'multiTouch']);
+            // Disable all interactive behaviors — glasses use key events only
+            map.behaviors.disable([
+                'scrollZoom',
+                'drag',
+                'dblClickZoom',
+                'rightMouseButtonMagnifier',
+                'multiTouch',
+                'leftMouseButtonMagnifier'
+            ]);
 
+            document.getElementById('main-status').innerText = "GPS Acquiring...";
             trackLocation();
         }
 
         function trackLocation() {
-            if (navigator.geolocation) {
-                navigator.geolocation.watchPosition(
-                    function(position) {
-                        userCoords = [position.coords.latitude, position.coords.longitude];
-                        updateNavigation();
-                    },
-                    function() {
-                        document.getElementById('main-status').innerText = "GPS Error";
-                    },
-                    { enableHighAccuracy: true, timeout: 10000 }
-                );
+            if (!navigator.geolocation) {
+                document.getElementById('main-status').innerText = "No GPS Support";
+                return;
             }
+            navigator.geolocation.watchPosition(
+                function(position) {
+                    userCoords = [position.coords.latitude, position.coords.longitude];
+                    updateNavigation();
+                },
+                function(err) {
+                    document.getElementById('main-status').innerText = "GPS Error: " + err.message;
+                    // Still show map at fallback coords
+                    updateNavigation();
+                },
+                { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+            );
         }
 
         function updateNavigation() {
-            const currentTarget = destinations[activeIndex];
+            var currentTarget = destinations[activeIndex];
 
             if (polylineTrack) {
                 map.geoObjects.remove(polylineTrack);
@@ -189,9 +188,10 @@
             }
 
             if (!currentTarget.address) {
+                // Just show current position
                 map.setCenter(userCoords, 16);
                 document.getElementById('main-status').innerText = currentTarget.name;
-                document.getElementById('sub-status').innerText = "Press arrow keys to cycle targets";
+                document.getElementById('sub-status').innerText = "Arrow keys to cycle targets";
 
                 polylineTrack = new ymaps.Circle([userCoords, 15], {}, {
                     fillColor: "#FF3366",
@@ -200,16 +200,20 @@
                     interactive: false
                 });
                 map.geoObjects.add(polylineTrack);
+
             } else {
+                document.getElementById('main-status').innerText = "Routing...";
+                document.getElementById('sub-status').innerText = currentTarget.name;
+
                 ymaps.route([userCoords, currentTarget.address], {
                     routingMode: 'auto'
                 }).done(
                     function(res) {
-                        let pathCoords = [];
-                        let paths = res.getPaths();
-                        for (let i = 0; i < paths.getLength(); i++) {
-                            let segments = paths.get(i).getSegments();
-                            for (let j = 0; j < segments.getLength(); j++) {
+                        var pathCoords = [];
+                        var paths = res.getPaths();
+                        for (var i = 0; i < paths.getLength(); i++) {
+                            var segments = paths.get(i).getSegments();
+                            for (var j = 0; j < segments.getLength(); j++) {
                                 pathCoords = pathCoords.concat(segments.get(j).getCoordinates());
                             }
                         }
@@ -224,19 +228,21 @@
                         map.geoObjects.add(polylineTrack);
                         map.setBounds(res.getBounds(), { checkZoomRange: true });
 
-                        let duration = res.getPaths().get(0).getProperties().get("duration").text;
-                        let distance = res.getPaths().get(0).getProperties().get("distance").text;
+                        var duration = res.getPaths().get(0).getProperties().get("duration").text;
+                        var distance = res.getPaths().get(0).getProperties().get("distance").text;
 
                         document.getElementById('main-status').innerText = currentTarget.name;
-                        document.getElementById('sub-status').innerText = duration + ' (' + distance + ') away';
+                        document.getElementById('sub-status').innerText = duration + " — " + distance;
                     },
-                    function() {
-                        document.getElementById('main-status').innerText = "Routing Failure";
+                    function(err) {
+                        document.getElementById('main-status').innerText = "Routing Failed";
+                        document.getElementById('sub-status').innerText = "Check connection";
                     }
                 );
             }
         }
 
+        // ── GLASSES GESTURE CONTROLS (mapped to arrow keys for testing) ──────
         window.addEventListener('keydown', function(event) {
             if (event.key === 'ArrowRight' || event.key === 'ArrowUp') {
                 activeIndex = (activeIndex + 1) % destinations.length;
@@ -246,6 +252,7 @@
                 updateNavigation();
             }
         });
+
     </script>
 </body>
 </html>
