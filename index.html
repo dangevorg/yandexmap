@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Glasses Yandex HUD Navigator</title>
+    <title>Glasses HUD - No Links</title>
     
     <script src="https://api-maps.yandex.ru/2.1/?lang=en_US" type="text/javascript"></script>
 
@@ -17,19 +17,30 @@
             color: #FFFFFF;
             font-family: Arial, sans-serif;
             overflow: hidden;
+            pointer-events: none; /* Prevents any touch/click actions entirely */
         }
 
         #map {
             width: 600px;
             height: 520px;
             background-color: #000000;
-            /* CRITICAL: Disables ALL touch and click inputs on the map itself so it never redirects */
-            pointer-events: none !important; 
         }
 
-        /* High-contrast smart overlay for HUD transparent lens */
+        /* Invert standard map layers to dark transparent HUD */
         .ymaps-2-1-79-map {
             filter: invert(100%) hue-rotate(180deg) brightness(100%) contrast(100%);
+        }
+
+        /* Nuclear option: Force hide absolutely everything injected by Yandex layout */
+        [class*="ymaps"], [class*="balloon"], [class*="layer"], [class*="control"], [class*="button"] {
+            box-shadow: none !important;
+        }
+        
+        /* Hides the default routing panels and shortcut buttons */
+        .ymaps-2-1-79-route-panel, .ymaps-2-1-79-inside-sandbox, a,ymaps {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
         }
 
         #status-bar {
@@ -57,28 +68,32 @@
 
     <div id="map"></div>
     <div id="status-bar">
-        <div id="main-status">Initializing Map...</div>
-        <div id="sub-status" class="sub-text">Waiting for GPS tracking...</div>
+        <div id="main-status">Initializing HUD...</div>
+        <div id="sub-status" class="sub-text">Waiting for GPS...</div>
     </div>
 
     <script type="text/javascript">
         let map;
-        let currentRoute = null;
-        let userCoords = [40.1792, 44.5152]; // Yerevan default fallback
-        
+        let userCoords = [40.1792, 44.5152]; // Yerevan fallback
+        let activeIndex = 0;
+        let polylineTrack = null;
+
         const destinations = [
-            { name: "My Current Position Only", coords: null },
+            { name: "Tracking Your Position", address: null },
             { name: "Heading: Republic Square", address: "Yerevan, Republic Square" },
             { name: "Heading: Cascade Complex", address: "Yerevan, Cascade" }
         ];
-        let activeIndex = 0;
 
         ymaps.ready(init);
         function init() {
+            // Initialize map with NO controls and click behavior completely disabled
             map = new ymaps.Map("map", {
                 center: userCoords,
                 zoom: 15,
                 controls: []
+            }, {
+                suppressMapOpenBlock: true, // Disables the "Open in Yandex Maps" logo block
+                yandexMapDisablePoiInteractivity: true // Disables clicking on buildings/shops
             });
 
             trackLocation();
@@ -91,10 +106,8 @@
                         userCoords = [position.coords.latitude, position.coords.longitude];
                         updateNavigation();
                     },
-                    (error) => {
-                        document.getElementById('main-status').innerText = "GPS Error";
-                    },
-                    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+                    (error) => { document.getElementById('main-status').innerText = "GPS Error"; },
+                    { enableHighAccuracy: true, timeout: 10000 }
                 );
             }
         }
@@ -102,62 +115,64 @@
         function updateNavigation() {
             const currentTarget = destinations[activeIndex];
 
-            if (currentRoute) {
-                map.geoObjects.remove(currentRoute);
-                currentRoute = null;
+            // Safely clear old drawn geometric tracks
+            if (polylineTrack) {
+                map.geoObjects.remove(polylineTrack);
+                polylineTrack = null;
             }
 
-            if (!currentTarget.coords && !currentTarget.address) {
+            if (!currentTarget.address) {
                 map.setCenter(userCoords, 16);
-                document.getElementById('main-status').innerText = "Tracking Position";
-                document.getElementById('sub-status').innerText = "Swipe frame to toggle presets";
+                document.getElementById('main-status').innerText = currentTarget.name;
+                document.getElementById('sub-status').innerText = "Swipe to cycle targets";
                 
-                let singlePlacemark = new ymaps.Placemark(userCoords, {}, { 
-                    preset: 'islands#redCircleDotIcon',
-                    hasBalloon: false
+                // Draw a simple custom circle dot that has zero click functionality
+                polylineTrack = new ymaps.Circle([userCoords, 15], {}, {
+                    fillColor: "#FF3366", strokeWidth: 0, hasBalloon: false, interactive: false
                 });
-                currentRoute = singlePlacemark;
-                map.geoObjects.add(singlePlacemark);
+                map.geoObjects.add(polylineTrack);
             } else {
-                document.getElementById('main-status').innerText = "Calculating Route...";
-                
-                let targetPoint = currentTarget.coords ? currentTarget.coords : currentTarget.address;
-
-                ymaps.route([userCoords, targetPoint], {
-                    multiRoute: true,
+                // Fetch raw routing lines without using Yandex's UI components
+                ymaps.route([userCoords, currentTarget.address], {
                     routingMode: 'auto'
                 }).done(
-                    function (route) {
-                        currentRoute = route;
-                        
-                        route.options.set({
-                            mapStateAutoApply: true,
-                            routeActiveStrokeColor: "#00FFCC",
-                            routeActiveStrokeWidth: 6,
-                            routeOpenBalloonOnClick: false,
-                            // Block any internal route markers from generating popups
-                            wayPointOpenBalloonOnClick: false,
-                            viaPointOpenBalloonOnClick: false
+                    function (res) {
+                        // Extract only the raw array of coordinates along the path
+                        let pathCoords = [];
+                        let paths = res.getPaths();
+                        for (let i = 0; i < paths.getLength(); i++) {
+                            let segments = paths.get(i).getSegments();
+                            for (let j = 0; j < segments.getLength(); j++) {
+                                pathCoords = pathCoords.concat(segments.get(j).getCoordinates());
+                            }
+                        }
+
+                        // Draw a custom neon geometric line over the map
+                        polylineTrack = new ymaps.Polyline(pathCoords, {}, {
+                            strokeColor: "#00FFCC",
+                            strokeWidth: 6,
+                            hasBalloon: false,
+                            interactive: false // Makes the line unclickable
                         });
 
-                        map.geoObjects.add(currentRoute);
+                        map.geoObjects.add(polylineTrack);
+                        map.setBounds(res.getBounds(), { checkZoomRange: true });
+
+                        // Extract time metrics
+                        let duration = res.getPaths().get(0).getProperties().get("duration").text;
+                        let distance = res.getPaths().get(0).getProperties().get("distance").text;
                         
-                        let activeRoute = route.getActiveRoute();
-                        if (activeRoute) {
-                            let duration = activeRoute.properties.get("duration").text;
-                            let distance = activeRoute.properties.get("distance").text;
-                            document.getElementById('main-status').innerText = `${currentTarget.name}`;
-                            document.getElementById('sub-status').innerText = `${duration} (${distance}) away`;
-                        }
+                        document.getElementById('main-status').innerText = currentTarget.name;
+                        document.getElementById('sub-status').innerText = `${duration} (${distance}) away`;
                     },
                     function (error) {
-                        document.getElementById('main-status').innerText = "Routing Failed";
+                        document.getElementById('main-status').innerText = "Routing Failure";
                     }
                 );
             }
         }
 
-        // Cycle targets only using glasses gestures (Arrow Keys)
+        // Control mappings for glasses gestures
         window.addEventListener('keydown', function(event) {
             if (event.key === 'ArrowRight' || event.key === 'ArrowUp') {
                 activeIndex = (activeIndex + 1) % destinations.length;
