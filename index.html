@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meta HUD - Open Search</title>
+    <title>Meta HUD - Armenia Navigator</title>
     
     <script src="https://api-maps.yandex.ru/2.1/?lang=en_US" type="text/javascript"></script>
 
@@ -29,7 +29,6 @@
             z-index: 1;
         }
 
-        /* Custom UI Search Overlay - Bypasses Yandex restrictions */
         #search-container {
             position: absolute;
             top: 15px;
@@ -37,7 +36,7 @@
             z-index: 10;
             display: flex;
             gap: 5px;
-            pointer-events: auto; /* Keeps this clickable inside the app */
+            pointer-events: auto; 
         }
 
         #custom-search {
@@ -62,7 +61,6 @@
             cursor: pointer;
         }
 
-        /* HUD Overlay Filter */
         .ymaps-2-1-79-map {
             filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
         }
@@ -71,7 +69,7 @@
 <body>
 
     <div id="search-container">
-        <input type="text" id="custom-search" placeholder="Type location...">
+        <input type="text" id="custom-search" placeholder="Enter street, city or venue...">
         <button id="custom-btn" onclick="searchLocation()">Go</button>
     </div>
 
@@ -79,23 +77,21 @@
 
     <script type="text/javascript">
         let map;
-        let userCoords = [40.1792, 44.5152]; // Yerevan fallback
+        let userCoords = [40.1792, 44.5152]; // Default to Yerevan Center
         let userMarker = null;
         let activeLine = null;
         let destMarker = null;
 
         ymaps.ready(init);
         function init() {
-            // Initialize map with NO Yandex controls to avoid server checks
             map = new ymaps.Map("map", {
                 center: userCoords,
-                zoom: 15,
+                zoom: 14,
                 controls: [] 
             }, {
                 suppressMapOpenBlock: true
             });
 
-            // Track location natively
             if (navigator.geolocation) {
                 navigator.geolocation.watchPosition((position) => {
                     userCoords = [position.coords.latitude, position.coords.longitude];
@@ -110,14 +106,14 @@
             }
         }
 
-        // Uses OpenStreetMap's free lookup engine instead of Yandex's broken backend
         function searchLocation() {
             const query = document.getElementById('custom-search').value.trim();
             if (!query) return;
 
             document.getElementById('custom-btn').innerText = "...";
 
-            fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`)
+            // FIXED: Added countrycodes=am to force the search engine to look inside Armenia only
+            fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=am&q=${encodeURIComponent(query)}&limit=1`)
                 .then(response => response.json())
                 .then(data => {
                     document.getElementById('custom-btn').innerText = "Go";
@@ -125,15 +121,12 @@
                     if (data && data.length > 0) {
                         let destCoords = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
 
-                        // Clear old route items
                         if (activeLine) map.geoObjects.remove(activeLine);
                         if (destMarker) map.geoObjects.remove(destMarker);
 
-                        // 1. Drop a clean destination marker
                         destMarker = new ymaps.Placemark(destCoords, {}, { preset: 'islands#redDotIcon' });
                         map.geoObjects.add(destMarker);
 
-                        // 2. Draw direct HUD navigation line straight to it
                         activeLine = new ymaps.Polyline([userCoords, destCoords], {}, {
                             strokeColor: "#00FFCC", 
                             strokeWidth: 6,
@@ -141,15 +134,14 @@
                         });
                         map.geoObjects.add(activeLine);
 
-                        // Autofit screen to see your route line
                         map.setBounds([userCoords, destCoords], { checkZoomRange: true, zoomMargin: 50 });
                     } else {
-                        alert("Location not found. Try adding a city name.");
+                        alert("Address not found in Armenia. Try adding the city name (e.g., 'Abovyan Street, Yerevan').");
                     }
                 })
                 .catch(err => {
                     document.getElementById('custom-btn').innerText = "Go";
-                    alert("Search engine busy. Try again.");
+                    alert("Search error. Please try again.");
                 });
         }
     </script>
