@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meta HUD - 3D HUD Navigator</title>
+    <title>Meta HUD - Global Navigator</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -18,10 +18,9 @@
             color: #FFFFFF;
             font-family: Arial, sans-serif;
             overflow: hidden;
-            perspective: 800px; /* Essential framework for 3D perspective depth */
+            perspective: 800px; 
         }
 
-        /* The map container handles the smooth 3D tilting animation transitions */
         #map {
             width: 600px;
             height: 600px;
@@ -34,7 +33,6 @@
             transition: transform 0.6s cubic-bezier(0.25, 1, 0.5, 1);
         }
 
-        /* FIXED: This CSS rule triggers the 3D angle when follow mode is locked */
         .tilt-3d {
             transform: translateY(-80px) scale(1.25) rotateX(55deg);
         }
@@ -167,7 +165,7 @@
 
     <div id="search-container">
         <div id="input-wrapper">
-            <input type="text" id="custom-search" placeholder="Search (e.g. Tumo)..." autocomplete="off" oninput="handleTyping()">
+            <input type="text" id="custom-search" placeholder="Search places..." autocomplete="off" oninput="handleTyping()">
             <button id="custom-btn" class="btn" onclick="triggerManualSearch()">Go</button>
             <button id="lock-btn" class="btn" onclick="toggleLockView()">Follow</button>
         </div>
@@ -178,7 +176,7 @@
 
     <script type="text/javascript">
         let map;
-        let userCoords = [40.1792, 44.5152]; 
+        let userCoords = [40.1792, 44.5152]; // Yerevan fallback
         let userMarker = null;
         let destMarker = null;
         let destCoords = null;
@@ -188,6 +186,10 @@
         let userHeading = 0;
         let tripStartTime = null;
         let elapsedInterval = null;
+
+        // Bounding box configuration to isolate Armenia prioritizations first
+        // [Left/West Longitude, Top/North Latitude, Right/East Longitude, Bottom/South Latitude]
+        const armeniaViewbox = "43.4,41.4,46.6,38.8";
 
         function initMap() {
             map = L.map('map', { zoomControl: false }).setView(userCoords, 16);
@@ -216,7 +218,6 @@
                     }
 
                     if (isLockedView) {
-                        // Offset the center slightly down when in 3D so you can see more of the road ahead
                         const offsetLat = userCoords[0] + 0.0015; 
                         map.setView([offsetLat, userCoords[1]], 17, { animate: false });
                     }
@@ -238,7 +239,6 @@
             }, true);
         }
 
-        // FIXED: Added DOM class injections to trigger the smooth 3D tilt effects
         function toggleLockView() {
             isLockedView = !isLockedView;
             const btn = document.getElementById('lock-btn');
@@ -247,13 +247,13 @@
             if (isLockedView) {
                 btn.classList.add('active-lock');
                 btn.innerText = "Locked";
-                mapContainer.classList.add('tilt-3d'); // Applies 3D transform skew rules
+                mapContainer.classList.add('tilt-3d'); 
                 const offsetLat = userCoords[0] + 0.0015;
                 map.setView([offsetLat, userCoords[1]], 17);
             } else {
                 btn.classList.remove('active-lock');
                 btn.innerText = "Follow";
-                mapContainer.classList.remove('tilt-3d'); // Reverts smoothly to flat 2D map views
+                mapContainer.classList.remove('tilt-3d'); 
                 map.setView(userCoords, 16);
             }
         }
@@ -310,7 +310,8 @@
             if (query.length < 2) { box.style.display = 'none'; return; }
 
             typingTimeout = setTimeout(() => {
-                fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=am&q=${encodeURIComponent(query)}&limit=5`)
+                // FIXED: Using viewbox tracking parameters to prioritize Armenia locations first globally
+                fetch(`https://nominatim.openstreetmap.org/search?format=json&viewbox=${armeniaViewbox}&bounded=0&q=${encodeURIComponent(query)}&limit=5`)
                     .then(res => res.json())
                     .then(data => {
                         box.innerHTML = '';
@@ -319,7 +320,11 @@
                             data.forEach(item => {
                                 let div = document.createElement('div');
                                 div.className = 'suggestion-item';
-                                div.innerText = item.display_name.split(',')[0] + (item.display_name.split(',')[1] ? ', ' + item.display_name.split(',')[1] : '');
+                                // Format text cleanly
+                                let cleanName = item.display_name.split(',')[0];
+                                let cleanContext = item.display_name.split(',')[1] ? ', ' + item.display_name.split(',')[1] : '';
+                                div.innerText = cleanName + cleanContext;
+                                
                                 div.onclick = () => selectDestination([parseFloat(item.lat), parseFloat(item.lon)], item.display_name);
                                 box.appendChild(div);
                             });
@@ -343,7 +348,9 @@
         function triggerManualSearch() {
             const query = document.getElementById('custom-search').value.trim();
             if (!query) return;
-            fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=am&q=${encodeURIComponent(query)}&limit=1`)
+            
+            // FIXED: Apply matching bias parameter constraints on fallback click executions
+            fetch(`https://nominatim.openstreetmap.org/search?format=json&viewbox=${armeniaViewbox}&bounded=0&q=${encodeURIComponent(query)}&limit=1`)
                 .then(res => res.json())
                 .then(data => {
                     if (data && data.length > 0) {
@@ -360,4 +367,3 @@
     </script>
 </body>
 </html>
-``` Use LaTeX only for formal/complex math/science where standard text is insufficient. Enclose all LaTeX using $inline$ or $$display$$. Never render LaTeX in a code block.
