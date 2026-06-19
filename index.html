@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meta HUD - Custom Styles Navigator</title>
+    <title>Meta HUD - 3D HUD Navigator</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -18,8 +18,10 @@
             color: #FFFFFF;
             font-family: Arial, sans-serif;
             overflow: hidden;
+            perspective: 800px; /* Essential framework for 3D perspective depth */
         }
 
+        /* The map container handles the smooth 3D tilting animation transitions */
         #map {
             width: 600px;
             height: 600px;
@@ -28,6 +30,13 @@
             top: 0;
             left: 0;
             z-index: 1;
+            transform-origin: bottom center;
+            transition: transform 0.6s cubic-bezier(0.25, 1, 0.5, 1);
+        }
+
+        /* FIXED: This CSS rule triggers the 3D angle when follow mode is locked */
+        .tilt-3d {
+            transform: translateY(-80px) scale(1.25) rotateX(55deg);
         }
 
         .leaflet-tile-container {
@@ -49,7 +58,6 @@
             gap: 5px;
         }
 
-        /* FIXED: Removed blue/cyan border colors */
         #custom-search {
             width: 150px;
             height: 32px;
@@ -71,14 +79,12 @@
             font-size: 13px;
         }
 
-        /* FIXED: Changed Go button to clean, matching dark gray/white theme */
         #custom-btn { 
             background: #333333; 
             color: #FFFFFF; 
             border: 1px solid #555555;
         }
 
-        /* FIXED: Custom Orange-Black theme for the Follow button */
         #lock-btn { 
             background: #111111; 
             color: #FF6600; 
@@ -111,7 +117,6 @@
         }
         .suggestion-item:hover { background: #222222; color: #FF6600; }
 
-        /* FIXED: Custom Navigation Arrow made Dark Gray */
         .nav-arrow {
             width: 0;
             height: 0;
@@ -139,7 +144,7 @@
         }
 
         .stat-element { text-align: center; }
-        .stat-val { font-size: 20px; font-weight: bold; color: #FF6600; } /* Text stats use matching theme accent */
+        .stat-val { font-size: 20px; font-weight: bold; color: #FF6600; } 
         .stat-lbl { font-size: 11px; color: #888888; text-transform: uppercase; margin-top: 2px; }
     </style>
 </head>
@@ -211,7 +216,9 @@
                     }
 
                     if (isLockedView) {
-                        map.setView(userCoords, 17);
+                        // Offset the center slightly down when in 3D so you can see more of the road ahead
+                        const offsetLat = userCoords[0] + 0.0015; 
+                        map.setView([offsetLat, userCoords[1]], 17, { animate: false });
                     }
 
                     if (destCoords) {
@@ -231,16 +238,23 @@
             }, true);
         }
 
+        // FIXED: Added DOM class injections to trigger the smooth 3D tilt effects
         function toggleLockView() {
             isLockedView = !isLockedView;
             const btn = document.getElementById('lock-btn');
+            const mapContainer = document.getElementById('map');
+            
             if (isLockedView) {
                 btn.classList.add('active-lock');
                 btn.innerText = "Locked";
-                map.setView(userCoords, 17);
+                mapContainer.classList.add('tilt-3d'); // Applies 3D transform skew rules
+                const offsetLat = userCoords[0] + 0.0015;
+                map.setView([offsetLat, userCoords[1]], 17);
             } else {
                 btn.classList.remove('active-lock');
                 btn.innerText = "Follow";
+                mapContainer.classList.remove('tilt-3d'); // Reverts smoothly to flat 2D map views
+                map.setView(userCoords, 16);
             }
         }
 
@@ -346,3 +360,4 @@
     </script>
 </body>
 </html>
+``` Use LaTeX only for formal/complex math/science where standard text is insufficient. Enclose all LaTeX using $inline$ or $$display$$. Never render LaTeX in a code block.
