@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meta HUD - Stable Armenia Map</title>
+    <title>Meta HUD - Armenia Open Tracker</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -30,9 +30,9 @@
             z-index: 1;
         }
 
-        /* Clean neon balance filter to make standard roads glow vivid green/blue */
+        /* Safe, client-side HUD dark mode filter that applies directly to public OpenStreetMap tiles */
         .leaflet-tile-container {
-            filter: brightness(110%) contrast(110%);
+            filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
         }
 
         #search-container {
@@ -101,7 +101,7 @@
 
     <div id="search-container">
         <div id="input-wrapper">
-            <input type="text" id="custom-search" placeholder="Search Armenia (e.g. Tumo)..." autocomplete="off" oninput="handleTyping()">
+            <input type="text" id="custom-search" placeholder="Type location (e.g. Tumo)..." autocomplete="off" oninput="handleTyping()">
             <button id="custom-btn" onclick="triggerManualSearch()">Go</button>
         </div>
         <div id="suggestions-box"></div>
@@ -111,7 +111,7 @@
 
     <script type="text/javascript">
         let map;
-        let userCoords = [40.1792, 44.5152]; // Yerevan default
+        let userCoords = [40.1792, 44.5152]; // Yerevan center default
         let userMarker = null;
         let destMarker = null;
         let activeLine = null;
@@ -121,10 +121,9 @@
         function initMap() {
             map = L.map('map', { zoomControl: false }).setView(userCoords, 16);
 
-            // FIXED: Using CartoDB Dark Matter tiles. Highly reliable, unrestricted, and natively deep black
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-                maxZoom: 20,
-                attribution: '© OpenStreetMap'
+            // FIXED URL: Running standard, completely open public tile delivery network (no proxy bans)
+            L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19
             }).addTo(map);
 
             startLiveTracking();
