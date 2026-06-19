@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meta HUD - Armenia Real Navigator</title>
+    <title>Meta HUD - Real Time Tracker</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -30,7 +30,6 @@
             z-index: 1;
         }
 
-        /* HUD style dark-inversion for glasses transparency */
         .leaflet-tile-container {
             filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
         }
@@ -51,7 +50,7 @@
         }
 
         #custom-search {
-            width: 220px;
+            width: 160px;
             height: 32px;
             background: #111111;
             border: 1px solid #00FFCC;
@@ -61,15 +60,29 @@
             border-radius: 4px;
         }
 
-        #custom-btn {
+        .btn {
             height: 34px;
-            padding: 0 15px;
-            background: #00FFCC;
-            color: #000000;
+            padding: 0 10px;
             border: none;
             font-weight: bold;
             border-radius: 4px;
             cursor: pointer;
+            font-size: 13px;
+        }
+
+        #custom-btn { background: #00FFCC; color: #000000; }
+
+        /* Lock Tracker Style Toggle Button */
+        #lock-btn {
+            background: #222222;
+            color: #FF3366;
+            border: 1px solid #FF3366;
+        }
+
+        .active-lock {
+            background: #FF3366 !important;
+            color: #000000 !important;
+            box-shadow: 0 0 10px rgba(255, 51, 102, 0.6);
         }
 
         #suggestions-box {
@@ -91,10 +104,7 @@
             cursor: pointer;
         }
 
-        .suggestion-item:hover {
-            background: #222222;
-            color: #00FFCC;
-        }
+        .suggestion-item:hover { background: #222222; color: #00FFCC; }
     </style>
 </head>
 <body>
@@ -102,7 +112,8 @@
     <div id="search-container">
         <div id="input-wrapper">
             <input type="text" id="custom-search" placeholder="Search (e.g. Tumo)..." autocomplete="off" oninput="handleTyping()">
-            <button id="custom-btn" onclick="triggerManualSearch()">Go</button>
+            <button id="custom-btn" class="btn" onclick="triggerManualSearch()">Go</button>
+            <button id="lock-btn" class="btn" onclick="toggleLockView()">Follow</button>
         </div>
         <div id="suggestions-box"></div>
     </div>
@@ -111,12 +122,13 @@
 
     <script type="text/javascript">
         let map;
-        let userCoords = [40.1792, 44.5152]; // Yerevan fallback
+        let userCoords = [40.1792, 44.5152]; 
         let userMarker = null;
         let destMarker = null;
         let routeLine = null;
         let destCoords = null;
         let typingTimeout;
+        let isLockedView = false; // Tracks if follow mode is active
 
         function initMap() {
             map = L.map('map', { zoomControl: false }).setView(userCoords, 16);
@@ -130,53 +142,65 @@
 
         function startLiveTracking() {
             if (navigator.geolocation) {
-                // watchPosition pings phone GPS constantly to track you as you walk
                 navigator.geolocation.watchPosition((position) => {
                     userCoords = [position.coords.latitude, position.coords.longitude];
                     
                     if (!userMarker) {
                         userMarker = L.circleMarker(userCoords, {
-                            color: '#00FFCC', fillColor: '#00FFCC', fillOpacity: 1, radius: 6
+                            color: '#00FFCC', fillColor: '#00FFCC', fillOpacity: 1, radius: 7
                         }).addTo(map);
                     } else {
                         userMarker.setLatLng(userCoords);
                     }
 
-                    // Native tracking: Centers screen automatically as your physical position moves
-                    if (!destCoords) {
-                        map.setView(userCoords);
-                    } else {
-                        // Dynamically refresh road navigation calculation while walking
+                    // Handles live camera adjustment
+                    if (isLockedView) {
+                        map.setView(userCoords, 17); // Snaps camera directly centered on you
+                    }
+
+                    if (destCoords) {
                         calculateRealStreetRoute();
                     }
                 }, null, { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 });
             }
         }
 
-        // Fetch street route metrics from the open routing server engine
+        function toggleLockView() {
+            isLockedView = !isLockedView;
+            const btn = document.getElementById('lock-btn');
+            
+            if (isLockedView) {
+                btn.classList.add('active-lock');
+                btn.innerText = "Locked";
+                map.setView(userCoords, 17); // Instant center snap
+            } else {
+                btn.classList.remove('active-lock');
+                btn.innerText = "Follow";
+            }
+        }
+
         function calculateRealStreetRoute() {
             if (!destCoords) return;
 
-            // Call OSRM public engine (Format is long,lat;long,lat)
             const osrmUrl = `https://router.project-osrm.org/route/v1/foot/${userCoords[1]},${userCoords[0]};${destCoords[1]},${destCoords[0]}?geometries=geojson`;
 
             fetch(osrmUrl)
                 .then(res => res.json())
                 .then(data => {
                     if (data.routes && data.routes.length > 0) {
-                        // Extract array of coordinates mapping perfectly along the actual layout of streets
                         const geometry = data.routes[0].geometry.coordinates;
                         const leafCoordinates = geometry.map(coord => [coord[1], coord[0]]);
 
                         if (routeLine) map.removeLayer(routeLine);
 
-                        // Draw real navigation road lines on layout
                         routeLine = L.polyline(leafCoordinates, {
                             color: '#00FFCC', weight: 6, opacity: 0.9
                         }).addTo(map);
 
-                        // Auto adjust lens framing to focus on upcoming trail segments
-                        map.setView(userCoords, 17);
+                        // Only auto-fit boundaries on initial load if user hasn't explicitly locked view tracking
+                        if (!isLockedView) {
+                            map.fitBounds(L.polyline(leafCoordinates).getBounds(), { padding: [40, 40] });
+                        }
                     }
                 }).catch(() => {});
         }
