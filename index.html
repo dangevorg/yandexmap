@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Meta HUD Search Map</title>
     
-    <script src="https://api-maps.yandex.ru/2.1/?lang=en_US" type="text/javascript"></script>
+    <script src="https://api-maps.yandex.ru/2.1/?lang=en_US&coordorder=latlong" type="text/javascript"></script>
 
     <style>
         body, html {
@@ -25,20 +25,27 @@
             background-color: #000000;
         }
 
-        /* Inverts the map layout to high-contrast transparent dark mode for glasses */
+        /* High-contrast dark lens inversion filter */
         .ymaps-2-1-79-map {
             filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
         }
 
-        /* Forces the Yandex Search Box UI to scale massive so you can easily type on it */
+        /* FIXED: Shrinking the search bar layout to make it small and sleek */
         .ymaps-2-1-79-searchbox {
-            width: 560px !important;
-            height: 60px !important;
-            margin: 20px !important;
+            width: 320px !important;  /* Reduced from 560px */
+            height: 40px !important;  /* Reduced from 60px */
+            margin: 15px !important;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.5) !important;
         }
+        
         .ymaps-2-1-79-searchbox-input__input {
-            font-size: 24px !important;
-            height: 45px !important;
+            font-size: 16px !important; /* Smaller, cleaner text font */
+            height: 30px !important;
+        }
+
+        .ymaps-2-1-79-searchbox__button {
+            height: 40px !important;
+            width: 50px !important;
         }
     </style>
 </head>
@@ -48,53 +55,58 @@
 
     <script type="text/javascript">
         let map;
-        let userCoords = [40.1792, 44.5152]; // Yerevan Default Fallback
+        let userCoords = [40.1792, 44.5152]; // Yerevan default fallback
 
         ymaps.ready(init);
         function init() {
-            // Re-enabling the 'searchControl' inside the map array framework
+            // Initializing map instance with fixed server parameters
             map = new ymaps.Map("map", {
                 center: userCoords,
                 zoom: 14,
                 controls: ['searchControl'] 
             }, {
-                suppressMapOpenBlock: true
+                suppressMapOpenBlock: true,
+                searchControlSearchOnPan: true // Allows seamless searching across areas
             });
 
-            // Trigger phone GPS coordinates lookup
+            // Handle location polling
             if (navigator.geolocation) {
                 navigator.geolocation.getCurrentPosition((position) => {
                     userCoords = [position.coords.latitude, position.coords.longitude];
                     map.setCenter(userCoords, 15);
                     
-                    // Put a flashing tracker mark at your exact feet location
                     let locationMarker = new ymaps.Placemark(userCoords, {}, {
                         preset: 'islands#violetDotIconWithCaption'
                     });
                     map.geoObjects.add(locationMarker);
-                });
+                }, (err) => {
+                    console.log("GPS structural timeout, using fallback coordinates.");
+                }, { enableHighAccuracy: true, timeout: 5000 });
             }
 
-            // Monitor search bar entries: Once you type a location, draw a route automatically
+            // Route execution engine loop
             let searchControl = map.controls.get('searchControl');
             searchControl.events.add('resultselect', function (e) {
                 let index = e.get('index');
                 searchControl.getResult(index).then(function (res) {
                     let destinationCoords = res.geometry.getCoordinates();
                     
-                    // Wipe clean old trails
+                    // Clear out old traces safely
                     map.geoObjects.removeAll();
 
-                    // Calculate the active pedestrian routing path
+                    // Query route paths directly via geometric coordinates 
                     ymaps.route([userCoords, destinationCoords], {
                         routingMode: 'pedestrian'
                     }).done(function (route) {
                         route.options.set({
                             mapStateAutoApply: true,
-                            routeActiveStrokeColor: "#00FFCC", // High visibility neon line
-                            routeActiveStrokeWidth: 7
+                            routeActiveStrokeColor: "#00FFCC", 
+                            routeActiveStrokeWidth: 6,
+                            routeOpenBalloonOnClick: false
                         });
                         map.geoObjects.add(route);
+                    }, function(routeError) {
+                        alert("Routing server request failed. Try a closer landmark.");
                     });
                 });
             });
