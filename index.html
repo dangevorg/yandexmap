@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meta HUD - Real Time Tracker</title>
+    <title>Meta HUD - Multi Route Navigator</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -50,7 +50,7 @@
         }
 
         #custom-search {
-            width: 160px;
+            width: 150px;
             height: 32px;
             background: #111111;
             border: 1px solid #00FFCC;
@@ -71,25 +71,14 @@
         }
 
         #custom-btn { background: #00FFCC; color: #000000; }
-
-        /* Lock Tracker Style Toggle Button */
-        #lock-btn {
-            background: #222222;
-            color: #FF3366;
-            border: 1px solid #FF3366;
-        }
-
-        .active-lock {
-            background: #FF3366 !important;
-            color: #000000 !important;
-            box-shadow: 0 0 10px rgba(255, 51, 102, 0.6);
-        }
+        #lock-btn { background: #222222; color: #FF3366; border: 1px solid #FF3366; }
+        .active-lock { background: #FF3366 !important; color: #000000 !important; }
 
         #suggestions-box {
             width: 240px;
             background: #111111;
             border: 1px solid #333333;
-            max-height: 180px;
+            max-height: 150px;
             overflow-y: auto;
             border-radius: 4px;
             margin-top: 2px;
@@ -103,8 +92,18 @@
             border-bottom: 1px solid #222222;
             cursor: pointer;
         }
-
         .suggestion-item:hover { background: #222222; color: #00FFCC; }
+
+        /* The Custom Navigation Arrow styling */
+        .nav-arrow {
+            width: 0;
+            height: 0;
+            border-left: 12px solid transparent;
+            border-right: 12px solid transparent;
+            border-bottom: 26px solid #00FFCC; /* Bright neon arrow */
+            filter: drop-shadow(0px 0px 6px #00FFCC);
+            transition: transform 0.1s linear;
+        }
     </style>
 </head>
 <body>
@@ -125,19 +124,21 @@
         let userCoords = [40.1792, 44.5152]; 
         let userMarker = null;
         let destMarker = null;
-        let routeLine = null;
         let destCoords = null;
         let typingTimeout;
-        let isLockedView = false; // Tracks if follow mode is active
+        let isLockedView = false;
+        
+        let availableRoutes = []; // Stores alternative routes
+        let selectedRouteIndex = 0;
+        let userHeading = 0;
 
         function initMap() {
             map = L.map('map', { zoomControl: false }).setView(userCoords, 16);
 
-            L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                maxZoom: 19
-            }).addTo(map);
+            L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
 
             startLiveTracking();
+            startCompassTracking();
         }
 
         function startLiveTracking() {
@@ -145,61 +146,95 @@
                 navigator.geolocation.watchPosition((position) => {
                     userCoords = [position.coords.latitude, position.coords.longitude];
                     
+                    // Creates or updates the native-style navigation arrow icon
+                    const arrowIcon = L.divIcon({
+                        className: 'nav-arrow-container',
+                        html: `<div id="arrow-element" class="nav-arrow" style="transform: rotate(${userHeading}deg);"></div>`,
+                        iconSize: [24, 26],
+                        iconAnchor: [12, 13]
+                    });
+
                     if (!userMarker) {
-                        userMarker = L.circleMarker(userCoords, {
-                            color: '#00FFCC', fillColor: '#00FFCC', fillOpacity: 1, radius: 7
-                        }).addTo(map);
+                        userMarker = L.marker(userCoords, { icon: arrowIcon }).addTo(map);
                     } else {
                         userMarker.setLatLng(userCoords);
                     }
 
-                    // Handles live camera adjustment
                     if (isLockedView) {
-                        map.setView(userCoords, 17); // Snaps camera directly centered on you
+                        map.setView(userCoords, 17);
                     }
 
                     if (destCoords) {
-                        calculateRealStreetRoute();
+                        calculateMultipleRoutes();
                     }
                 }, null, { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 });
             }
         }
 
+        // Monitors device hardware sensors to read heading/bearing orientation live
+        function startCompassTracking() {
+            window.addEventListener('deviceorientationabsolute', (e) => {
+                if (e.alpha !== null) {
+                    userHeading = 360 - e.alpha; // Computes compass heading angles
+                    const el = document.getElementById('arrow-element');
+                    if (el) el.style.transform = `rotate(${userHeading}deg)`;
+                }
+            }, true);
+        }
+
         function toggleLockView() {
             isLockedView = !isLockedView;
             const btn = document.getElementById('lock-btn');
-            
             if (isLockedView) {
                 btn.classList.add('active-lock');
                 btn.innerText = "Locked";
-                map.setView(userCoords, 17); // Instant center snap
+                map.setView(userCoords, 17);
             } else {
                 btn.classList.remove('active-lock');
                 btn.innerText = "Follow";
             }
         }
 
-        function calculateRealStreetRoute() {
+        function calculateMultipleRoutes() {
             if (!destCoords) return;
 
-            const osrmUrl = `https://router.project-osrm.org/route/v1/foot/${userCoords[1]},${userCoords[0]};${destCoords[1]},${destCoords[0]}?geometries=geojson`;
+            // FIXED URL: Passing alternatives=true option to compute separate street layers
+            const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${userCoords[1]},${userCoords[0]};${destCoords[1]},${destCoords[0]}?geometries=geojson&alternatives=true`;
 
             fetch(osrmUrl)
                 .then(res => res.json())
                 .then(data => {
                     if (data.routes && data.routes.length > 0) {
-                        const geometry = data.routes[0].geometry.coordinates;
-                        const leafCoordinates = geometry.map(coord => [coord[1], coord[0]]);
+                        // Clear old track lines off the map layout array
+                        availableRoutes.forEach(r => map.removeLayer(r.layer));
+                        availableRoutes = [];
 
-                        if (routeLine) map.removeLayer(routeLine);
+                        // Define colors for primary vs alternative options
+                        const routeColors = ['#00FFCC', '#9933FF', '#AAAAAA']; 
 
-                        routeLine = L.polyline(leafCoordinates, {
-                            color: '#00FFCC', weight: 6, opacity: 0.9
-                        }).addTo(map);
+                        data.routes.forEach((route, idx) => {
+                            const geometry = route.geometry.coordinates;
+                            const leafCoordinates = geometry.map(coord => [coord[1], coord[0]]);
 
-                        // Only auto-fit boundaries on initial load if user hasn't explicitly locked view tracking
+                            // Draw route line on map
+                            let polyline = L.polyline(leafCoordinates, {
+                                color: idx === selectedRouteIndex ? routeColors[0] : routeColors[Math.min(idx, 2)],
+                                weight: idx === selectedRouteIndex ? 7 : 4,
+                                opacity: idx === selectedRouteIndex ? 0.95 : 0.5,
+                                interactive: true
+                            }).addTo(map);
+
+                            // Clicking a line changes your active navigation target route instantly
+                            polyline.on('click', () => {
+                                selectedRouteIndex = idx;
+                                calculateMultipleRoutes(); // Redraws layout weights and focus states
+                            });
+
+                            availableRoutes.push({ index: idx, layer: polyline });
+                        });
+
                         if (!isLockedView) {
-                            map.fitBounds(L.polyline(leafCoordinates).getBounds(), { padding: [40, 40] });
+                            map.fitBounds(availableRoutes[selectedRouteIndex].layer.getBounds(), { padding: [40, 40] });
                         }
                     }
                 }).catch(() => {});
@@ -209,11 +244,7 @@
             clearTimeout(typingTimeout);
             const query = document.getElementById('custom-search').value.trim();
             const box = document.getElementById('suggestions-box');
-
-            if (query.length < 2) {
-                box.style.display = 'none';
-                return;
-            }
+            if (query.length < 2) { box.style.display = 'none'; return; }
 
             typingTimeout = setTimeout(() => {
                 fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=am&q=${encodeURIComponent(query)}&limit=5`)
@@ -229,38 +260,34 @@
                                 div.onclick = () => selectDestination([parseFloat(item.lat), parseFloat(item.lon)], item.display_name);
                                 box.appendChild(div);
                             });
-                        } else {
-                            box.style.display = 'none';
-                        }
+                        } else { box.style.display = 'none'; }
                     }).catch(() => {});
             }, 400);
         }
 
         function selectDestination(coords, displayName) {
             destCoords = coords;
+            selectedRouteIndex = 0; // Reset focus to route 1
             document.getElementById('custom-search').value = displayName.split(',')[0];
             document.getElementById('suggestions-box').style.display = 'none';
             
             if (destMarker) map.removeLayer(destMarker);
-            destMarker = L.circleMarker(destCoords, {
-                color: '#FF3366', fillColor: '#000000', fillOpacity: 0.5, radius: 7, weight: 3
-            }).addTo(map);
+            destMarker = L.circleMarker(destCoords, { color: '#FF3366', radius: 6 }).addTo(map);
 
-            calculateRealStreetRoute();
+            calculateMultipleRoutes();
         }
 
         function triggerManualSearch() {
             const query = document.getElementById('custom-search').value.trim();
             if (!query) return;
-            
             fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=am&q=${encodeURIComponent(query)}&limit=1`)
                 .then(res => res.json())
                 .then(data => {
                     if (data && data.length > 0) {
                         destCoords = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
                         if (destMarker) map.removeLayer(destMarker);
-                        destMarker = L.circleMarker(destCoords, { color: '#FF3366', radius: 7 }).addTo(map);
-                        calculateRealStreetRoute();
+                        destMarker = L.circleMarker(destCoords, { color: '#FF3366', radius: 6 }).addTo(map);
+                        calculateMultipleRoutes();
                     }
                 });
         }
