@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meta HUD Free GPS Map</title>
+    <title>Meta HUD - Open Search</title>
     
     <script src="https://api-maps.yandex.ru/2.1/?lang=en_US" type="text/javascript"></script>
 
@@ -23,92 +23,134 @@
             width: 600px;
             height: 600px;
             background-color: #000000;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
         }
 
-        /* Dark HUD overlay filter */
+        /* Custom UI Search Overlay - Bypasses Yandex restrictions */
+        #search-container {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            z-index: 10;
+            display: flex;
+            gap: 5px;
+            pointer-events: auto; /* Keeps this clickable inside the app */
+        }
+
+        #custom-search {
+            width: 220px;
+            height: 32px;
+            background: #222222;
+            border: 1px solid #00FFCC;
+            color: #FFFFFF;
+            padding: 0 10px;
+            font-size: 14px;
+            border-radius: 4px;
+        }
+
+        #custom-btn {
+            height: 34px;
+            padding: 0 15px;
+            background: #00FFCC;
+            color: #000000;
+            border: none;
+            font-weight: bold;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        /* HUD Overlay Filter */
         .ymaps-2-1-79-map {
             filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
-        }
-
-        /* Clean, tiny, unobtrusive search box */
-        .ymaps-2-1-79-searchbox {
-            width: 280px !important; 
-            height: 36px !important;  
-            margin: 10px !important;
-        }
-        
-        .ymaps-2-1-79-searchbox-input__input {
-            font-size: 14px !important; 
-            height: 26px !important;
-        }
-
-        .ymaps-2-1-79-searchbox__button {
-            height: 36px !important;
-            width: 45px !important;
         }
     </style>
 </head>
 <body>
 
+    <div id="search-container">
+        <input type="text" id="custom-search" placeholder="Type location...">
+        <button id="custom-btn" onclick="searchLocation()">Go</button>
+    </div>
+
     <div id="map"></div>
 
     <script type="text/javascript">
         let map;
-        let userCoords = [40.1792, 44.5152]; // Fallback
+        let userCoords = [40.1792, 44.5152]; // Yerevan fallback
         let userMarker = null;
         let activeLine = null;
+        let destMarker = null;
 
         ymaps.ready(init);
         function init() {
+            // Initialize map with NO Yandex controls to avoid server checks
             map = new ymaps.Map("map", {
                 center: userCoords,
                 zoom: 15,
-                controls: ['searchControl'] 
+                controls: [] 
             }, {
                 suppressMapOpenBlock: true
             });
 
-            // Track live positioning loop natively without Yandex servers
+            // Track location natively
             if (navigator.geolocation) {
                 navigator.geolocation.watchPosition((position) => {
                     userCoords = [position.coords.latitude, position.coords.longitude];
                     
                     if (!userMarker) {
-                        userMarker = new ymaps.Placemark(userCoords, { iconCaption: "You" }, {
-                            preset: 'islands#violetDotIcon'
-                        });
+                        userMarker = new ymaps.Placemark(userCoords, {}, { preset: 'islands#violetDotIcon' });
                         map.geoObjects.add(userMarker);
                     } else {
                         userMarker.geometry.setCoordinates(userCoords);
                     }
                 }, null, { enableHighAccuracy: true });
             }
+        }
 
-            // Capture address coordinates and draw track natively
-            let searchControl = map.controls.get('searchControl');
-            searchControl.events.add('resultselect', function (e) {
-                let index = e.get('index');
-                searchControl.getResult(index).then(function (res) {
-                    let destCoords = res.geometry.getCoordinates();
+        // Uses OpenStreetMap's free lookup engine instead of Yandex's broken backend
+        function searchLocation() {
+            const query = document.getElementById('custom-search').value.trim();
+            if (!query) return;
+
+            document.getElementById('custom-btn').innerText = "...";
+
+            fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`)
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('custom-btn').innerText = "Go";
                     
-                    // Clear any previous lines
-                    if (activeLine) map.geoObjects.remove(activeLine);
+                    if (data && data.length > 0) {
+                        let destCoords = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
 
-                    // Draw a clean line directly from your feet to the destination
-                    activeLine = new ymaps.Polyline([userCoords, destCoords], {
-                        balloonContent: "Direct Track Line"
-                    }, {
-                        strokeColor: "#00FFCC", // Neon cyan HUD track line
-                        strokeWidth: 6,
-                        opacity: 0.8
-                    });
+                        // Clear old route items
+                        if (activeLine) map.geoObjects.remove(activeLine);
+                        if (destMarker) map.geoObjects.remove(destMarker);
 
-                    map.geoObjects.add(activeLine);
-                    
-                    // Autofit map screen bounds dynamically
-                    map.setBounds([userCoords, destCoords], { checkZoomRange: true, zoomMargin: 40 });
+                        // 1. Drop a clean destination marker
+                        destMarker = new ymaps.Placemark(destCoords, {}, { preset: 'islands#redDotIcon' });
+                        map.geoObjects.add(destMarker);
+
+                        // 2. Draw direct HUD navigation line straight to it
+                        activeLine = new ymaps.Polyline([userCoords, destCoords], {}, {
+                            strokeColor: "#00FFCC", 
+                            strokeWidth: 6,
+                            opacity: 0.9
+                        });
+                        map.geoObjects.add(activeLine);
+
+                        // Autofit screen to see your route line
+                        map.setBounds([userCoords, destCoords], { checkZoomRange: true, zoomMargin: 50 });
+                    } else {
+                        alert("Location not found. Try adding a city name.");
+                    }
+                })
+                .catch(err => {
+                    document.getElementById('custom-btn').innerText = "Go";
+                    alert("Search engine busy. Try again.");
                 });
-            });
         }
     </script>
 </body>
