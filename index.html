@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meta HUD - Multi Route Navigator</title>
+    <title>Meta HUD - Advanced Real Navigator</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -36,7 +36,7 @@
 
         #search-container {
             position: absolute;
-            top: 15px;
+            top: 85px; /* Pushed down slightly to clear space for the HUD stats bar */
             left: 15px;
             z-index: 1000; 
             display: flex;
@@ -94,19 +94,67 @@
         }
         .suggestion-item:hover { background: #222222; color: #00FFCC; }
 
-        /* The Custom Navigation Arrow styling */
         .nav-arrow {
             width: 0;
             height: 0;
             border-left: 12px solid transparent;
             border-right: 12px solid transparent;
-            border-bottom: 26px solid #00FFCC; /* Bright neon arrow */
+            border-bottom: 26px solid #00FFCC; 
             filter: drop-shadow(0px 0px 6px #00FFCC);
             transition: transform 0.1s linear;
+        }
+
+        /* NEW: Premium Navigator Live Stats HUD Bar Overlay */
+        #hud-stats-bar {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 600px;
+            height: 70px;
+            background-color: rgba(10, 10, 10, 0.9);
+            border-bottom: 2px solid #333333;
+            z-index: 2000;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            box-sizing: border-box;
+            padding: 0 10px;
+        }
+
+        .stat-element {
+            text-align: center;
+        }
+
+        .stat-val {
+            font-size: 20px;
+            font-weight: bold;
+            color: #00FFCC;
+        }
+
+        .stat-lbl {
+            font-size: 11px;
+            color: #888888;
+            text-transform: uppercase;
+            margin-top: 2px;
         }
     </style>
 </head>
 <body>
+
+    <div id="hud-stats-bar">
+        <div class="stat-element">
+            <div id="hud-elapsed" class="stat-val">00:00</div>
+            <div class="stat-lbl">On Road</div>
+        </div>
+        <div class="stat-element">
+            <div id="hud-remaining" class="stat-val">-- min</div>
+            <div class="stat-lbl">Left</div>
+        </div>
+        <div class="stat-element">
+            <div id="hud-distance" class="stat-val">-- km</div>
+            <div class="stat-lbl">Distance</div>
+        </div>
+    </div>
 
     <div id="search-container">
         <div id="input-wrapper">
@@ -128,13 +176,16 @@
         let typingTimeout;
         let isLockedView = false;
         
-        let availableRoutes = []; // Stores alternative routes
+        let availableRoutes = []; 
         let selectedRouteIndex = 0;
         let userHeading = 0;
 
+        // Trip Timer Variables
+        let tripStartTime = null;
+        let elapsedInterval = null;
+
         function initMap() {
             map = L.map('map', { zoomControl: false }).setView(userCoords, 16);
-
             L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
 
             startLiveTracking();
@@ -146,7 +197,6 @@
                 navigator.geolocation.watchPosition((position) => {
                     userCoords = [position.coords.latitude, position.coords.longitude];
                     
-                    // Creates or updates the native-style navigation arrow icon
                     const arrowIcon = L.divIcon({
                         className: 'nav-arrow-container',
                         html: `<div id="arrow-element" class="nav-arrow" style="transform: rotate(${userHeading}deg);"></div>`,
@@ -171,11 +221,10 @@
             }
         }
 
-        // Monitors device hardware sensors to read heading/bearing orientation live
         function startCompassTracking() {
             window.addEventListener('deviceorientationabsolute', (e) => {
                 if (e.alpha !== null) {
-                    userHeading = 360 - e.alpha; // Computes compass heading angles
+                    userHeading = 360 - e.alpha; 
                     const el = document.getElementById('arrow-element');
                     if (el) el.style.transform = `rotate(${userHeading}deg)`;
                 }
@@ -198,46 +247,73 @@
         function calculateMultipleRoutes() {
             if (!destCoords) return;
 
-            // FIXED URL: Passing alternatives=true option to compute separate street layers
             const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${userCoords[1]},${userCoords[0]};${destCoords[1]},${destCoords[0]}?geometries=geojson&alternatives=true`;
 
             fetch(osrmUrl)
                 .then(res => res.json())
                 .then(data => {
                     if (data.routes && data.routes.length > 0) {
-                        // Clear old track lines off the map layout array
                         availableRoutes.forEach(r => map.removeLayer(r.layer));
                         availableRoutes = [];
 
-                        // Define colors for primary vs alternative options
-                        const routeColors = ['#00FFCC', '#9933FF', '#AAAAAA']; 
+                        // UPDATED COLORS: Thick Dark Indigo (#1A0066) for selected path with bright fallback options
+                        const activeColor = '#1A0066';
+                        const altColors = ['#5500A5', '#555555']; 
 
                         data.routes.forEach((route, idx) => {
                             const geometry = route.geometry.coordinates;
                             const leafCoordinates = geometry.map(coord => [coord[1], coord[0]]);
 
-                            // Draw route line on map
+                            // Drawing alternative route tracks
                             let polyline = L.polyline(leafCoordinates, {
-                                color: idx === selectedRouteIndex ? routeColors[0] : routeColors[Math.min(idx, 2)],
-                                weight: idx === selectedRouteIndex ? 7 : 4,
-                                opacity: idx === selectedRouteIndex ? 0.95 : 0.5,
+                                color: idx === selectedRouteIndex ? activeColor : altColors[Math.min(idx, 1)],
+                                weight: idx === selectedRouteIndex ? 12 : 5, // CHANGED: Significantly thicker road layout
+                                opacity: idx === selectedRouteIndex ? 1.0 : 0.4,
                                 interactive: true
                             }).addTo(map);
 
-                            // Clicking a line changes your active navigation target route instantly
+                            // Adds a subtle bright neon underline highlight so the dark route stands out against pure black lens views
+                            if (idx === selectedRouteIndex) {
+                                let underlineHighlight = L.polyline(leafCoordinates, {
+                                    color: '#00FFCC', weight: 16, opacity: 0.25
+                                }).addTo(map);
+                                availableRoutes.push({ index: idx, layer: underlineHighlight });
+                            }
+
                             polyline.on('click', () => {
                                 selectedRouteIndex = idx;
-                                calculateMultipleRoutes(); // Redraws layout weights and focus states
+                                calculateMultipleRoutes(); 
                             });
 
                             availableRoutes.push({ index: idx, layer: polyline });
                         });
 
+                        // UPDATED: Dynamically parsing remaining metrics straight to HUD
+                        const activeRouteData = data.routes[selectedRouteIndex];
+                        const distanceKm = (activeRouteData.distance / 1000).toFixed(1);
+                        const durationMin = Math.round(activeRouteData.duration / 60);
+
+                        document.getElementById('hud-remaining').innerText = `${durationMin} min`;
+                        document.getElementById('hud-distance').innerText = `${distanceKm} km`;
+
                         if (!isLockedView) {
-                            map.fitBounds(availableRoutes[selectedRouteIndex].layer.getBounds(), { padding: [40, 40] });
+                            map.fitBounds(L.polyline(activeRouteData.geometry.coordinates.map(c => [c[1], c[0]])).getBounds(), { padding: [40, 40] });
                         }
                     }
                 }).catch(() => {});
+        }
+
+        // NEW: Handles calculation logic for elapsed trip duration clock tracker
+        function startTripTimer() {
+            if (elapsedInterval) clearInterval(elapsedInterval);
+            tripStartTime = Date.now();
+            
+            elapsedInterval = setInterval(() => {
+                const totalSeconds = Math.floor((Date.now() - tripStartTime) / 1000);
+                const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
+                const seconds = (totalSeconds % 60).toString().padStart(2, '0');
+                document.getElementById('hud-elapsed').innerText = `${minutes}:${seconds}`;
+            }, 1000);
         }
 
         function handleTyping() {
@@ -267,13 +343,14 @@
 
         function selectDestination(coords, displayName) {
             destCoords = coords;
-            selectedRouteIndex = 0; // Reset focus to route 1
+            selectedRouteIndex = 0; 
             document.getElementById('custom-search').value = displayName.split(',')[0];
             document.getElementById('suggestions-box').style.display = 'none';
             
             if (destMarker) map.removeLayer(destMarker);
             destMarker = L.circleMarker(destCoords, { color: '#FF3366', radius: 6 }).addTo(map);
 
+            startTripTimer(); // Starts the on-road trip clock when you select destination
             calculateMultipleRoutes();
         }
 
@@ -287,6 +364,7 @@
                         destCoords = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
                         if (destMarker) map.removeLayer(destMarker);
                         destMarker = L.circleMarker(destCoords, { color: '#FF3366', radius: 6 }).addTo(map);
+                        startTripTimer();
                         calculateMultipleRoutes();
                     }
                 });
