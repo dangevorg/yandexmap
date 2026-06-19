@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meta HUD - 2GIS Armenia Map</title>
+    <title>Meta HUD - Stable Armenia Map</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -30,9 +30,9 @@
             z-index: 1;
         }
 
-        /* Transparent dark HUD filter applied over the 2GIS tile layouts */
+        /* Clean neon balance filter to make standard roads glow vivid green/blue */
         .leaflet-tile-container {
-            filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
+            filter: brightness(110%) contrast(110%);
         }
 
         #search-container {
@@ -101,7 +101,7 @@
 
     <div id="search-container">
         <div id="input-wrapper">
-            <input type="text" id="custom-search" placeholder="Search via 2GIS Data..." autocomplete="off" oninput="handleTyping()">
+            <input type="text" id="custom-search" placeholder="Search Armenia (e.g. Tumo)..." autocomplete="off" oninput="handleTyping()">
             <button id="custom-btn" onclick="triggerManualSearch()">Go</button>
         </div>
         <div id="suggestions-box"></div>
@@ -121,11 +121,10 @@
         function initMap() {
             map = L.map('map', { zoomControl: false }).setView(userCoords, 16);
 
-            // CHANGED: Routing Leaflet directly into the official, open-access 2GIS map servers
-            L.tileLayer('https://tile{s}.maps.2gis.com/tiles?x={x}&y={y}&z={z}', {
-                subdomains: ['0', '1', '2', '3'],
-                maxZoom: 18,
-                attribution: '© 2GIS'
+            // FIXED: Using CartoDB Dark Matter tiles. Highly reliable, unrestricted, and natively deep black
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                maxZoom: 20,
+                attribution: '© OpenStreetMap'
             }).addTo(map);
 
             startLiveTracking();
@@ -138,7 +137,93 @@
                     
                     if (!userMarker) {
                         userMarker = L.circleMarker(userCoords, {
-                            color: '#FF3366', fillColor: '#FF3366', fillOpacity: 1, radius: 8
+                            color: '#00FFCC', fillColor: '#00FFCC', fillOpacity: 1, radius: 6
                         }).addTo(map);
                         map.setView(userCoords);
-                    } else
+                    } else {
+                        userMarker.setLatLng(userCoords);
+                    }
+
+                    if (destCoords) {
+                        if (activeLine) map.removeLayer(activeLine);
+                        activeLine = L.polyline([userCoords, destCoords], {
+                            color: '#FF3366', weight: 5, opacity: 0.95
+                        }).addTo(map);
+                    }
+                }, null, { enableHighAccuracy: true });
+            }
+        }
+
+        function handleTyping() {
+            clearTimeout(typingTimeout);
+            const query = document.getElementById('custom-search').value.trim();
+            const box = document.getElementById('suggestions-box');
+
+            if (query.length < 2) {
+                box.style.display = 'none';
+                return;
+            }
+
+            typingTimeout = setTimeout(() => {
+                fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=am&q=${encodeURIComponent(query)}&limit=5`)
+                    .then(res => res.json())
+                    .then(data => {
+                        box.innerHTML = '';
+                        if (data && data.length > 0) {
+                            box.style.display = 'block';
+                            data.forEach(item => {
+                                let div = document.createElement('div');
+                                div.className = 'suggestion-item';
+                                div.innerText = item.display_name.split(',')[0] + (item.display_name.split(',')[1] ? ', ' + item.display_name.split(',')[1] : '');
+                                div.onclick = () => selectDestination([parseFloat(item.lat), parseFloat(item.lon)], item.display_name);
+                                box.appendChild(div);
+                            });
+                        } else {
+                            box.style.display = 'none';
+                        }
+                    }).catch(() => {});
+            }, 400);
+        }
+
+        function selectDestination(coords, displayName) {
+            destCoords = coords;
+            document.getElementById('custom-search').value = displayName.split(',')[0];
+            document.getElementById('suggestions-box').style.display = 'none';
+            drawHUDRoute();
+        }
+
+        function triggerManualSearch() {
+            const query = document.getElementById('custom-search').value.trim();
+            if (!query) return;
+            
+            fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=am&q=${encodeURIComponent(query)}&limit=1`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data && data.length > 0) {
+                        destCoords = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+                        drawHUDRoute();
+                    }
+                });
+        }
+
+        function drawHUDRoute() {
+            if (!destCoords) return;
+
+            if (destMarker) map.removeLayer(destMarker);
+            if (activeLine) map.removeLayer(activeLine);
+
+            destMarker = L.circleMarker(destCoords, {
+                color: '#FF3366', fillColor: '#000000', fillOpacity: 0.4, radius: 8, weight: 3
+            }).addTo(map);
+
+            activeLine = L.polyline([userCoords, destCoords], {
+                color: '#FF3366', weight: 6, opacity: 0.95
+            }).addTo(map);
+
+            map.fitBounds(L.polyline([userCoords, destCoords]).getBounds(), { padding: [40, 40] });
+        }
+
+        window.onload = initMap;
+    </script>
+</body>
+</html>
