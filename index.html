@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meta HUD - Armenia Navigator</title>
+    <title>Meta HUD - Armenia Autocomplete</title>
     
     <script src="https://api-maps.yandex.ru/2.1/?lang=en_US" type="text/javascript"></script>
 
@@ -35,8 +35,13 @@
             left: 15px;
             z-index: 10;
             display: flex;
-            gap: 5px;
+            flex-direction: column;
             pointer-events: auto; 
+        }
+
+        #input-wrapper {
+            display: flex;
+            gap: 5px;
         }
 
         #custom-search {
@@ -61,6 +66,31 @@
             cursor: pointer;
         }
 
+        /* Live Suggestions Dropdown Box */
+        #suggestions-box {
+            width: 240px;
+            background: #111111;
+            border: 1px solid #333333;
+            max-height: 200px;
+            overflow-y: auto;
+            border-radius: 4px;
+            margin-top: 2px;
+            display: none;
+        }
+
+        .suggestion-item {
+            padding: 10px;
+            font-size: 13px;
+            color: #BBBBBB;
+            border-bottom: 1px solid #222222;
+            cursor: pointer;
+        }
+
+        .suggestion-item:hover {
+            background: #222222;
+            color: #00FFCC;
+        }
+
         .ymaps-2-1-79-map {
             filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
         }
@@ -69,24 +99,29 @@
 <body>
 
     <div id="search-container">
-        <input type="text" id="custom-search" placeholder="Enter street, city or venue...">
-        <button id="custom-btn" onclick="searchLocation()">Go</button>
+        <div id="input-wrapper">
+            <input type="text" id="custom-search" placeholder="Type location (e.g. Tumo)..." autocomplete="off" oninput="handleTyping()">
+            <button id="custom-btn" onclick="triggerManualSearch()">Go</button>
+        </div>
+        <div id="suggestions-box"></div>
     </div>
 
     <div id="map"></div>
 
     <script type="text/javascript">
         let map;
-        let userCoords = [40.1792, 44.5152]; // Default to Yerevan Center
+        let userCoords = [40.1792, 44.5152]; // Yerevan center default
         let userMarker = null;
         let activeLine = null;
         let destMarker = null;
+        let destCoords = null;
+        let typingTimeout;
 
         ymaps.ready(init);
         function init() {
             map = new ymaps.Map("map", {
                 center: userCoords,
-                zoom: 14,
+                zoom: 16,
                 controls: [] 
             }, {
                 suppressMapOpenBlock: true
@@ -96,54 +131,61 @@
                 navigator.geolocation.watchPosition((position) => {
                     userCoords = [position.coords.latitude, position.coords.longitude];
                     
+                    // Live follow mode: Continually update user track position on screen
                     if (!userMarker) {
                         userMarker = new ymaps.Placemark(userCoords, {}, { preset: 'islands#violetDotIcon' });
                         map.geoObjects.add(userMarker);
+                        map.setCenter(userCoords);
                     } else {
                         userMarker.geometry.setCoordinates(userCoords);
+                    }
+
+                    // Dynamically refresh tracking overlay line while you walk
+                    if (destCoords) {
+                        if (activeLine) map.geoObjects.remove(activeLine);
+                        activeLine = new ymaps.Polyline([userCoords, destCoords], {}, {
+                            strokeColor: "#00FFCC", strokeWidth: 6, opacity: 0.9
+                        });
+                        map.geoObjects.add(activeLine);
                     }
                 }, null, { enableHighAccuracy: true });
             }
         }
 
-        function searchLocation() {
+        // Listens as you type to fetch instant Yerevan autocomplete options
+        function handleTyping() {
+            clearTimeout(typingTimeout);
             const query = document.getElementById('custom-search').value.trim();
-            if (!query) return;
+            const box = document.getElementById('suggestions-box');
 
-            document.getElementById('custom-btn').innerText = "...";
+            if (query.length < 2) {
+                box.style.display = 'none';
+                return;
+            }
 
-            // FIXED: Added countrycodes=am to force the search engine to look inside Armenia only
-            fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=am&q=${encodeURIComponent(query)}&limit=1`)
-                .then(response => response.json())
-                .then(data => {
-                    document.getElementById('custom-btn').innerText = "Go";
-                    
-                    if (data && data.length > 0) {
-                        let destCoords = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+            // Wait until user pauses typing briefly before querying server
+            typingTimeout = setTimeout(() => {
+                // Fetching via a localized geographical search engine centered near Yerevan coords
+                fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&lat=${userCoords[0]}&lon=${userCoords[1]}&limit=5`)
+                    .then(res => res.json())
+                    .then(data => {
+                        box.innerHTML = '';
+                        if (data.features && data.features.length > 0) {
+                            box.style.display = 'block';
+                            data.features.forEach(feature => {
+                                const props = feature.properties;
+                                // Filter suggestions to prioritize items in Armenia
+                                if (props.country === "Armenia" || !props.country) {
+                                    let name = props.name || '';
+                                    let street = props.street ? `, ${props.street}` : '';
+                                    let city = props.city ? `, ${props.city}` : '';
+                                    let fullDisplay = `${name}${street}${city}`;
 
-                        if (activeLine) map.geoObjects.remove(activeLine);
-                        if (destMarker) map.geoObjects.remove(destMarker);
-
-                        destMarker = new ymaps.Placemark(destCoords, {}, { preset: 'islands#redDotIcon' });
-                        map.geoObjects.add(destMarker);
-
-                        activeLine = new ymaps.Polyline([userCoords, destCoords], {}, {
-                            strokeColor: "#00FFCC", 
-                            strokeWidth: 6,
-                            opacity: 0.9
-                        });
-                        map.geoObjects.add(activeLine);
-
-                        map.setBounds([userCoords, destCoords], { checkZoomRange: true, zoomMargin: 50 });
-                    } else {
-                        alert("Address not found in Armenia. Try adding the city name (e.g., 'Abovyan Street, Yerevan').");
-                    }
-                })
-                .catch(err => {
-                    document.getElementById('custom-btn').innerText = "Go";
-                    alert("Search error. Please try again.");
-                });
-        }
-    </script>
-</body>
-</html>
+                                    let item = document.createElement('div');
+                                    item.className = 'suggestion-item';
+                                    item.innerText = fullDisplay;
+                                    item.onclick = () => selectDestination([feature.geometry.coordinates[1], feature.geometry.coordinates[0]], fullDisplay);
+                                    box.appendChild(item);
+                                }
+                            });
+                        } else {
