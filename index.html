@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meta HUD - Advanced Real Navigator</title>
+    <title>Meta HUD - Custom Styles Navigator</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -36,7 +36,7 @@
 
         #search-container {
             position: absolute;
-            top: 85px; /* Pushed down slightly to clear space for the HUD stats bar */
+            top: 85px; 
             left: 15px;
             z-index: 1000; 
             display: flex;
@@ -49,11 +49,12 @@
             gap: 5px;
         }
 
+        /* FIXED: Removed blue/cyan border colors */
         #custom-search {
             width: 150px;
             height: 32px;
             background: #111111;
-            border: 1px solid #00FFCC;
+            border: 1px solid #444444;
             color: #FFFFFF;
             padding: 0 10px;
             font-size: 14px;
@@ -70,9 +71,25 @@
             font-size: 13px;
         }
 
-        #custom-btn { background: #00FFCC; color: #000000; }
-        #lock-btn { background: #222222; color: #FF3366; border: 1px solid #FF3366; }
-        .active-lock { background: #FF3366 !important; color: #000000 !important; }
+        /* FIXED: Changed Go button to clean, matching dark gray/white theme */
+        #custom-btn { 
+            background: #333333; 
+            color: #FFFFFF; 
+            border: 1px solid #555555;
+        }
+
+        /* FIXED: Custom Orange-Black theme for the Follow button */
+        #lock-btn { 
+            background: #111111; 
+            color: #FF6600; 
+            border: 1px solid #FF6600; 
+        }
+        
+        .active-lock { 
+            background: #FF6600 !important; 
+            color: #000000 !important; 
+            box-shadow: 0 0 10px rgba(255, 102, 0, 0.6);
+        }
 
         #suggestions-box {
             width: 240px;
@@ -92,19 +109,19 @@
             border-bottom: 1px solid #222222;
             cursor: pointer;
         }
-        .suggestion-item:hover { background: #222222; color: #00FFCC; }
+        .suggestion-item:hover { background: #222222; color: #FF6600; }
 
+        /* FIXED: Custom Navigation Arrow made Dark Gray */
         .nav-arrow {
             width: 0;
             height: 0;
             border-left: 12px solid transparent;
             border-right: 12px solid transparent;
-            border-bottom: 26px solid #00FFCC; 
-            filter: drop-shadow(0px 0px 6px #00FFCC);
+            border-bottom: 26px solid #444444; 
+            filter: drop-shadow(0px 0px 4px rgba(255, 255, 255, 0.2));
             transition: transform 0.1s linear;
         }
 
-        /* NEW: Premium Navigator Live Stats HUD Bar Overlay */
         #hud-stats-bar {
             position: absolute;
             top: 0;
@@ -121,22 +138,9 @@
             padding: 0 10px;
         }
 
-        .stat-element {
-            text-align: center;
-        }
-
-        .stat-val {
-            font-size: 20px;
-            font-weight: bold;
-            color: #00FFCC;
-        }
-
-        .stat-lbl {
-            font-size: 11px;
-            color: #888888;
-            text-transform: uppercase;
-            margin-top: 2px;
-        }
+        .stat-element { text-align: center; }
+        .stat-val { font-size: 20px; font-weight: bold; color: #FF6600; } /* Text stats use matching theme accent */
+        .stat-lbl { font-size: 11px; color: #888888; text-transform: uppercase; margin-top: 2px; }
     </style>
 </head>
 <body>
@@ -173,14 +177,10 @@
         let userMarker = null;
         let destMarker = null;
         let destCoords = null;
+        let activeRouteLine = null;
         let typingTimeout;
         let isLockedView = false;
-        
-        let availableRoutes = []; 
-        let selectedRouteIndex = 0;
         let userHeading = 0;
-
-        // Trip Timer Variables
         let tripStartTime = null;
         let elapsedInterval = null;
 
@@ -215,7 +215,7 @@
                     }
 
                     if (destCoords) {
-                        calculateMultipleRoutes();
+                        calculateRoute();
                     }
                 }, null, { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 });
             }
@@ -244,70 +244,43 @@
             }
         }
 
-        function calculateMultipleRoutes() {
+        function calculateRoute() {
             if (!destCoords) return;
 
-            const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${userCoords[1]},${userCoords[0]};${destCoords[1]},${destCoords[0]}?geometries=geojson&alternatives=true`;
+            const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${userCoords[1]},${userCoords[0]};${destCoords[1]},${destCoords[0]}?geometries=geojson`;
 
             fetch(osrmUrl)
                 .then(res => res.json())
                 .then(data => {
                     if (data.routes && data.routes.length > 0) {
-                        availableRoutes.forEach(r => map.removeLayer(r.layer));
-                        availableRoutes = [];
+                        const route = data.routes[0];
+                        const geometry = route.geometry.coordinates;
+                        const leafCoordinates = geometry.map(coord => [coord[1], coord[0]]);
 
-                        // UPDATED COLORS: Thick Dark Indigo (#1A0066) for selected path with bright fallback options
-                        const activeColor = '#1A0066';
-                        const altColors = ['#5500A5', '#555555']; 
+                        const distanceKm = (route.distance / 1000).toFixed(1);
+                        const durationMin = Math.round(route.duration / 60);
 
-                        data.routes.forEach((route, idx) => {
-                            const geometry = route.geometry.coordinates;
-                            const leafCoordinates = geometry.map(coord => [coord[1], coord[0]]);
-
-                            // Drawing alternative route tracks
-                            let polyline = L.polyline(leafCoordinates, {
-                                color: idx === selectedRouteIndex ? activeColor : altColors[Math.min(idx, 1)],
-                                weight: idx === selectedRouteIndex ? 12 : 5, // CHANGED: Significantly thicker road layout
-                                opacity: idx === selectedRouteIndex ? 1.0 : 0.4,
-                                interactive: true
-                            }).addTo(map);
-
-                            // Adds a subtle bright neon underline highlight so the dark route stands out against pure black lens views
-                            if (idx === selectedRouteIndex) {
-                                let underlineHighlight = L.polyline(leafCoordinates, {
-                                    color: '#00FFCC', weight: 16, opacity: 0.25
-                                }).addTo(map);
-                                availableRoutes.push({ index: idx, layer: underlineHighlight });
-                            }
-
-                            polyline.on('click', () => {
-                                selectedRouteIndex = idx;
-                                calculateMultipleRoutes(); 
-                            });
-
-                            availableRoutes.push({ index: idx, layer: polyline });
-                        });
-
-                        // UPDATED: Dynamically parsing remaining metrics straight to HUD
-                        const activeRouteData = data.routes[selectedRouteIndex];
-                        const distanceKm = (activeRouteData.distance / 1000).toFixed(1);
-                        const durationMin = Math.round(activeRouteData.duration / 60);
-
-                        document.getElementById('hud-remaining').innerText = `${durationMin} min`;
                         document.getElementById('hud-distance').innerText = `${distanceKm} km`;
+                        document.getElementById('hud-remaining').innerText = `${durationMin} min`;
+
+                        if (activeRouteLine) map.removeLayer(activeRouteLine);
+
+                        activeRouteLine = L.polyline(leafCoordinates, {
+                            color: '#00FF33',
+                            weight: 3, 
+                            opacity: 0.95
+                        }).addTo(map);
 
                         if (!isLockedView) {
-                            map.fitBounds(L.polyline(activeRouteData.geometry.coordinates.map(c => [c[1], c[0]])).getBounds(), { padding: [40, 40] });
+                            map.fitBounds(activeRouteLine.getBounds(), { padding: [40, 40] });
                         }
                     }
                 }).catch(() => {});
         }
 
-        // NEW: Handles calculation logic for elapsed trip duration clock tracker
         function startTripTimer() {
             if (elapsedInterval) clearInterval(elapsedInterval);
             tripStartTime = Date.now();
-            
             elapsedInterval = setInterval(() => {
                 const totalSeconds = Math.floor((Date.now() - tripStartTime) / 1000);
                 const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
@@ -343,15 +316,14 @@
 
         function selectDestination(coords, displayName) {
             destCoords = coords;
-            selectedRouteIndex = 0; 
             document.getElementById('custom-search').value = displayName.split(',')[0];
             document.getElementById('suggestions-box').style.display = 'none';
             
             if (destMarker) map.removeLayer(destMarker);
-            destMarker = L.circleMarker(destCoords, { color: '#FF3366', radius: 6 }).addTo(map);
+            destMarker = L.circleMarker(destCoords, { color: '#FF3366', radius: 5 }).addTo(map);
 
-            startTripTimer(); // Starts the on-road trip clock when you select destination
-            calculateMultipleRoutes();
+            startTripTimer(); 
+            calculateRoute();
         }
 
         function triggerManualSearch() {
@@ -363,9 +335,9 @@
                     if (data && data.length > 0) {
                         destCoords = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
                         if (destMarker) map.removeLayer(destMarker);
-                        destMarker = L.circleMarker(destCoords, { color: '#FF3366', radius: 6 }).addTo(map);
+                        destMarker = L.circleMarker(destCoords, { color: '#FF3366', radius: 5 }).addTo(map);
                         startTripTimer();
-                        calculateMultipleRoutes();
+                        calculateRoute();
                     }
                 });
         }
