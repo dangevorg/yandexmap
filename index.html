@@ -3,9 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meta HUD - Armenia Autocomplete</title>
+    <title>Meta HUD - Open Armenia Map</title>
     
-    <script src="https://api-maps.yandex.ru/2.1/?lang=en_US" type="text/javascript"></script>
+    <!-- Load 100% Free Open Source Map Engine (No API Keys needed) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
     <style>
         body, html {
@@ -29,11 +31,16 @@
             z-index: 1;
         }
 
+        /* Inverts open-source map tiles to high-contrast HUD transparent mode for glasses */
+        .leaflet-tile-container {
+            filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
+        }
+
         #search-container {
             position: absolute;
             top: 15px;
             left: 15px;
-            z-index: 10;
+            z-index: 1000; /* Force overlay on top of map layers */
             display: flex;
             flex-direction: column;
             pointer-events: auto; 
@@ -47,7 +54,7 @@
         #custom-search {
             width: 220px;
             height: 32px;
-            background: #222222;
+            background: #111111;
             border: 1px solid #00FFCC;
             color: #FFFFFF;
             padding: 0 10px;
@@ -66,12 +73,11 @@
             cursor: pointer;
         }
 
-        /* Live Suggestions Dropdown Box */
         #suggestions-box {
             width: 240px;
             background: #111111;
             border: 1px solid #333333;
-            max-height: 200px;
+            max-height: 180px;
             overflow-y: auto;
             border-radius: 4px;
             margin-top: 2px;
@@ -90,17 +96,13 @@
             background: #222222;
             color: #00FFCC;
         }
-
-        .ymaps-2-1-79-map {
-            filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
-        }
     </style>
 </head>
 <body>
 
     <div id="search-container">
         <div id="input-wrapper">
-            <input type="text" id="custom-search" placeholder="Type location (e.g. Tumo)..." autocomplete="off" oninput="handleTyping()">
+            <input type="text" id="custom-search" placeholder="Search Armenia (e.g. Tumo)..." autocomplete="off" oninput="handleTyping()">
             <button id="custom-btn" onclick="triggerManualSearch()">Go</button>
         </div>
         <div id="suggestions-box"></div>
@@ -110,49 +112,52 @@
 
     <script type="text/javascript">
         let map;
-        let userCoords = [40.1792, 44.5152]; // Yerevan center default
+        let userCoords = [40.1792, 44.5152]; // Yerevan default fallback
         let userMarker = null;
-        let activeLine = null;
         let destMarker = null;
+        let activeLine = null;
         let destCoords = null;
         let typingTimeout;
 
-        ymaps.ready(init);
-        function init() {
-            map = new ymaps.Map("map", {
-                center: userCoords,
-                zoom: 16,
-                controls: [] 
-            }, {
-                suppressMapOpenBlock: true
-            });
+        // Initialize free map framework
+        function initMap() {
+            map = L.map('map', { zoomControl: false }).setView(userCoords, 15);
 
+            // Load free OpenStreetMap cartography tiles
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19
+            }).addTo(map);
+
+            startLiveTracking();
+        }
+
+        function startLiveTracking() {
             if (navigator.geolocation) {
                 navigator.geolocation.watchPosition((position) => {
                     userCoords = [position.coords.latitude, position.coords.longitude];
                     
-                    // Live follow mode: Continually update user track position on screen
+                    // Update user position circle dot
                     if (!userMarker) {
-                        userMarker = new ymaps.Placemark(userCoords, {}, { preset: 'islands#violetDotIcon' });
-                        map.geoObjects.add(userMarker);
-                        map.setCenter(userCoords);
+                        userMarker = L.circleMarker(userCoords, {
+                            color: '#FF3366', fillColor: '#FF3366', fillOpacity: 1, radius: 8
+                        }).addTo(map);
+                        map.setView(userCoords);
                     } else {
-                        userMarker.geometry.setCoordinates(userCoords);
+                        userMarker.setLatLng(userCoords);
                     }
 
-                    // Dynamically refresh tracking overlay line while you walk
+                    // Dynamically recalculate direct route line as you walk
                     if (destCoords) {
-                        if (activeLine) map.geoObjects.remove(activeLine);
-                        activeLine = new ymaps.Polyline([userCoords, destCoords], {}, {
-                            strokeColor: "#00FFCC", strokeWidth: 6, opacity: 0.9
-                        });
-                        map.geoObjects.add(activeLine);
+                        if (activeLine) map.removeLayer(activeLine);
+                        activeLine = L.polyline([userCoords, destCoords], {
+                            color: '#00FFCC', weight: 5, opacity: 0.9
+                        }).addTo(map);
                     }
                 }, null, { enableHighAccuracy: true });
             }
         }
 
-        // Listens as you type to fetch instant Yerevan autocomplete options
+        // Real-time search suggestions engine biased strictly to Armenia bounds
         function handleTyping() {
             clearTimeout(typingTimeout);
             const query = document.getElementById('custom-search').value.trim();
@@ -163,29 +168,68 @@
                 return;
             }
 
-            // Wait until user pauses typing briefly before querying server
             typingTimeout = setTimeout(() => {
-                // Fetching via a localized geographical search engine centered near Yerevan coords
-                fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&lat=${userCoords[0]}&lon=${userCoords[1]}&limit=5`)
+                fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=am&q=${encodeURIComponent(query)}&limit=5`)
                     .then(res => res.json())
                     .then(data => {
                         box.innerHTML = '';
-                        if (data.features && data.features.length > 0) {
+                        if (data && data.length > 0) {
                             box.style.display = 'block';
-                            data.features.forEach(feature => {
-                                const props = feature.properties;
-                                // Filter suggestions to prioritize items in Armenia
-                                if (props.country === "Armenia" || !props.country) {
-                                    let name = props.name || '';
-                                    let street = props.street ? `, ${props.street}` : '';
-                                    let city = props.city ? `, ${props.city}` : '';
-                                    let fullDisplay = `${name}${street}${city}`;
-
-                                    let item = document.createElement('div');
-                                    item.className = 'suggestion-item';
-                                    item.innerText = fullDisplay;
-                                    item.onclick = () => selectDestination([feature.geometry.coordinates[1], feature.geometry.coordinates[0]], fullDisplay);
-                                    box.appendChild(item);
-                                }
+                            data.forEach(item => {
+                                let div = document.createElement('div');
+                                div.className = 'suggestion-item';
+                                div.innerText = item.display_name.split(',')[0] + (item.display_name.split(',')[1] ? ', ' + item.display_name.split(',')[1] : '');
+                                div.onclick = () => selectDestination([parseFloat(item.lat), parseFloat(item.lon)], item.display_name);
+                                box.appendChild(div);
                             });
                         } else {
+                            box.style.display = 'none';
+                        }
+                    }).catch(() => {});
+            }, 400);
+        }
+
+        function selectDestination(coords, displayName) {
+            destCoords = coords;
+            document.getElementById('custom-search').value = displayName.split(',')[0];
+            document.getElementById('suggestions-box').style.display = 'none';
+            drawHUDRoute();
+        }
+
+        function triggerManualSearch() {
+            const query = document.getElementById('custom-search').value.trim();
+            if (!query) return;
+            
+            fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=am&q=${encodeURIComponent(query)}&limit=1`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data && data.length > 0) {
+                        destCoords = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+                        drawHUDRoute();
+                    }
+                });
+        }
+
+        function drawHUDRoute() {
+            if (!destCoords) return;
+
+            if (destMarker) map.removeLayer(destMarker);
+            if (activeLine) map.removeLayer(activeLine);
+
+            // 1. Plot clear target pin
+            destMarker = L.marker(destCoords).addTo(map);
+
+            // 2. Draw active routing line connecting you to your target coordinates
+            activeLine = L.polyline([userCoords, destCoords], {
+                color: '#00FFCC', weight: 6, opacity: 0.9
+            }).addTo(map);
+
+            // Fit screen bounds to keep track visible
+            map.fitBounds(L.polyline([userCoords, destCoords]).getBounds(), { padding: [40, 40] });
+        }
+
+        // Fire on page run
+        window.onload = initMap;
+    </script>
+</body>
+</html>
