@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meta HUD Search Map</title>
+    <title>Meta HUD Free GPS Map</title>
     
-    <script src="https://api-maps.yandex.ru/2.1/?lang=en_US&coordorder=latlong" type="text/javascript"></script>
+    <script src="https://api-maps.yandex.ru/2.1/?lang=en_US" type="text/javascript"></script>
 
     <style>
         body, html {
@@ -25,27 +25,26 @@
             background-color: #000000;
         }
 
-        /* High-contrast dark lens inversion filter */
+        /* Dark HUD overlay filter */
         .ymaps-2-1-79-map {
             filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
         }
 
-        /* FIXED: Shrinking the search bar layout to make it small and sleek */
+        /* Clean, tiny, unobtrusive search box */
         .ymaps-2-1-79-searchbox {
-            width: 320px !important;  /* Reduced from 560px */
-            height: 40px !important;  /* Reduced from 60px */
-            margin: 15px !important;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.5) !important;
+            width: 280px !important; 
+            height: 36px !important;  
+            margin: 10px !important;
         }
         
         .ymaps-2-1-79-searchbox-input__input {
-            font-size: 16px !important; /* Smaller, cleaner text font */
-            height: 30px !important;
+            font-size: 14px !important; 
+            height: 26px !important;
         }
 
         .ymaps-2-1-79-searchbox__button {
-            height: 40px !important;
-            width: 50px !important;
+            height: 36px !important;
+            width: 45px !important;
         }
     </style>
 </head>
@@ -55,59 +54,59 @@
 
     <script type="text/javascript">
         let map;
-        let userCoords = [40.1792, 44.5152]; // Yerevan default fallback
+        let userCoords = [40.1792, 44.5152]; // Fallback
+        let userMarker = null;
+        let activeLine = null;
 
         ymaps.ready(init);
         function init() {
-            // Initializing map instance with fixed server parameters
             map = new ymaps.Map("map", {
                 center: userCoords,
-                zoom: 14,
+                zoom: 15,
                 controls: ['searchControl'] 
             }, {
-                suppressMapOpenBlock: true,
-                searchControlSearchOnPan: true // Allows seamless searching across areas
+                suppressMapOpenBlock: true
             });
 
-            // Handle location polling
+            // Track live positioning loop natively without Yandex servers
             if (navigator.geolocation) {
-                navigator.geolocation.getCurrentPosition((position) => {
+                navigator.geolocation.watchPosition((position) => {
                     userCoords = [position.coords.latitude, position.coords.longitude];
-                    map.setCenter(userCoords, 15);
                     
-                    let locationMarker = new ymaps.Placemark(userCoords, {}, {
-                        preset: 'islands#violetDotIconWithCaption'
-                    });
-                    map.geoObjects.add(locationMarker);
-                }, (err) => {
-                    console.log("GPS structural timeout, using fallback coordinates.");
-                }, { enableHighAccuracy: true, timeout: 5000 });
+                    if (!userMarker) {
+                        userMarker = new ymaps.Placemark(userCoords, { iconCaption: "You" }, {
+                            preset: 'islands#violetDotIcon'
+                        });
+                        map.geoObjects.add(userMarker);
+                    } else {
+                        userMarker.geometry.setCoordinates(userCoords);
+                    }
+                }, null, { enableHighAccuracy: true });
             }
 
-            // Route execution engine loop
+            // Capture address coordinates and draw track natively
             let searchControl = map.controls.get('searchControl');
             searchControl.events.add('resultselect', function (e) {
                 let index = e.get('index');
                 searchControl.getResult(index).then(function (res) {
-                    let destinationCoords = res.geometry.getCoordinates();
+                    let destCoords = res.geometry.getCoordinates();
                     
-                    // Clear out old traces safely
-                    map.geoObjects.removeAll();
+                    // Clear any previous lines
+                    if (activeLine) map.geoObjects.remove(activeLine);
 
-                    // Query route paths directly via geometric coordinates 
-                    ymaps.route([userCoords, destinationCoords], {
-                        routingMode: 'pedestrian'
-                    }).done(function (route) {
-                        route.options.set({
-                            mapStateAutoApply: true,
-                            routeActiveStrokeColor: "#00FFCC", 
-                            routeActiveStrokeWidth: 6,
-                            routeOpenBalloonOnClick: false
-                        });
-                        map.geoObjects.add(route);
-                    }, function(routeError) {
-                        alert("Routing server request failed. Try a closer landmark.");
+                    // Draw a clean line directly from your feet to the destination
+                    activeLine = new ymaps.Polyline([userCoords, destCoords], {
+                        balloonContent: "Direct Track Line"
+                    }, {
+                        strokeColor: "#00FFCC", // Neon cyan HUD track line
+                        strokeWidth: 6,
+                        opacity: 0.8
                     });
+
+                    map.geoObjects.add(activeLine);
+                    
+                    // Autofit map screen bounds dynamically
+                    map.setBounds([userCoords, destCoords], { checkZoomRange: true, zoomMargin: 40 });
                 });
             });
         }
