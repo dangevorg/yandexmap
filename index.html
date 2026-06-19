@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meta HUD - SVG Arrow Navigator</title>
+    <title>Meta HUD - Keyboard & Arrow Navigator</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -77,23 +77,9 @@
             font-size: 13px;
         }
 
-        #custom-btn { 
-            background: #333333; 
-            color: #FFFFFF; 
-            border: 1px solid #555555;
-        }
-
-        #lock-btn { 
-            background: #111111; 
-            color: #FF6600; 
-            border: 1px solid #FF6600; 
-        }
-        
-        .active-lock { 
-            background: #FF6600 !important; 
-            color: #000000 !important; 
-            box-shadow: 0 0 10px rgba(255, 102, 0, 0.6);
-        }
+        #custom-btn { background: #333333; color: #FFFFFF; border: 1px solid #555555; }
+        #lock-btn { background: #111111; color: #FF6600; border: 1px solid #FF6600; }
+        .active-lock { background: #FF6600 !important; color: #000000 !important; box-shadow: 0 0 10px rgba(255, 102, 0, 0.6); }
 
         #suggestions-box {
             width: 240px;
@@ -113,13 +99,56 @@
             border-bottom: 1px solid #222222;
             cursor: pointer;
         }
-        .suggestion-item:hover { background: #222222; color: #FF6600; }
+        
+        /* Highlighted style when navigating suggestions with arrow keys */
+        .suggestion-item.selected, .suggestion-item:hover { 
+            background: #222222; 
+            color: #FF6600; 
+        }
 
-        /* FIXED: Redesigned SVG Arrow Wrapper */
+        /* NEW: On-Screen Virtual Keyboard Container styling */
+        #virtual-keyboard {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 600px;
+            background: rgba(15, 15, 15, 0.95);
+            border-top: 2px solid #333333;
+            padding: 10px;
+            box-sizing: border-box;
+            z-index: 3000;
+            display: none; /* Hidden until search bar focus */
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .keyboard-row {
+            display: flex;
+            justify-content: center;
+            gap: 4px;
+        }
+
+        .key {
+            background: #222222;
+            border: 1px solid #444444;
+            color: #FFFFFF;
+            padding: 10px 0;
+            width: 48px;
+            text-align: center;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 14px;
+            user-select: none;
+        }
+        .key:active { background: #FF6600; color: #000000; }
+        .key.wide { width: 100px; }
+        .key.space { width: 220px; }
+
         .nav-arrow-svg {
             width: 32px;
             height: 32px;
-            fill: #444444; /* Dark Gray */
+            fill: #444444; 
             filter: drop-shadow(0px 1px 3px rgba(255, 255, 255, 0.3));
             transition: transform 0.1s linear;
         }
@@ -171,6 +200,24 @@
         <div id="suggestions-box"></div>
     </div>
 
+    <div id="virtual-keyboard">
+        <div class="keyboard-row">
+            <div class="key" onclick="pressKey('1')">1</div><div class="key" onclick="pressKey('2')">2</div><div class="key" onclick="pressKey('3')">3</div><div class="key" onclick="pressKey('4')">4</div><div class="key" onclick="pressKey('5')">5</div><div class="key" onclick="pressKey('6')">6</div><div class="key" onclick="pressKey('7')">7</div><div class="key" onclick="pressKey('8')">8</div><div class="key" onclick="pressKey('9')">9</div><div class="key" onclick="pressKey('0')">0</div>
+        </div>
+        <div class="keyboard-row">
+            <div class="key" onclick="pressKey('q')">Q</div><div class="key" onclick="pressKey('w')">W</div><div class="key" onclick="pressKey('e')">E</div><div class="key" onclick="pressKey('r')">R</div><div class="key" onclick="pressKey('t')">T</div><div class="key" onclick="pressKey('y')">Y</div><div class="key" onclick="pressKey('u')">U</div><div class="key" onclick="pressKey('i')">I</div><div class="key" onclick="pressKey('o')">O</div><div class="key" onclick="pressKey('p')">P</div>
+        </div>
+        <div class="keyboard-row">
+            <div class="key" onclick="pressKey('a')">A</div><div class="key" onclick="pressKey('s')">S</div><div class="key" onclick="pressKey('d')">D</div><div class="key" onclick="pressKey('f')">F</div><div class="key" onclick="pressKey('g')">G</div><div class="key" onclick="pressKey('h')">H</div><div class="key" onclick="pressKey('j')">J</div><div class="key" onclick="pressKey('k')">K</div><div class="key" onclick="pressKey('l')">L</div>
+        </div>
+        <div class="keyboard-row">
+            <div class="key" onclick="pressKey('z')">Z</div><div class="key" onclick="pressKey('x')">X</div><div class="key" onclick="pressKey('c')">C</div><div class="key" onclick="pressKey('v')">V</div><div class="key" onclick="pressKey('b')">B</div><div class="key" onclick="pressKey('n')">N</div><div class="key" onclick="pressKey('m')">M</div><div class="key wide" onclick="pressKey('backspace')">←</div>
+        </div>
+        <div class="keyboard-row">
+            <div class="key space" onclick="pressKey(' ')">Space</div><div class="key wide" style="background:#FF6600; color:#000;" onclick="pressKey('enter')">Done</div>
+        </div>
+    </div>
+
     <div id="map"></div>
 
     <script type="text/javascript">
@@ -186,6 +233,10 @@
         let tripStartTime = null;
         let elapsedInterval = null;
 
+        // Arrow navigation active tracker index tracking
+        let currentFocusIndex = -1;
+        let suggestionItemsData = [];
+
         const armeniaViewbox = "43.4,41.4,46.6,38.8";
 
         function initMap() {
@@ -194,6 +245,63 @@
 
             startLiveTracking();
             startCompassTracking();
+            setupKeyboardEventListeners();
+        }
+
+        // Handle opening and closing the virtual overlay when searching
+        const searchInput = document.getElementById('custom-search');
+        const keyboard = document.getElementById('virtual-keyboard');
+        
+        searchInput.addEventListener('focus', () => { keyboard.style.display = 'flex'; });
+        
+        function pressKey(char) {
+            if (char === 'backspace') {
+                searchInput.value = searchInput.value.slice(0, -1);
+            } else if (char === 'enter') {
+                keyboard.style.display = 'none';
+                triggerManualSearch();
+            } else {
+                searchInput.value += char;
+            }
+            handleTyping();
+        }
+
+        // NEW: Intercept hard key listeners for Arrow Key navigation controls
+        function setupKeyboardEventListeners() {
+            document.addEventListener('keydown', (e) => {
+                const box = document.getElementById('suggestions-box');
+                const items = box.getElementsByClassName('suggestion-item');
+                
+                if (box.style.display === 'block' && items.length > 0) {
+                    if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        currentFocusIndex++;
+                        if (currentFocusIndex >= items.length) currentFocusIndex = 0;
+                        updateSuggestionHighlight(items);
+                    } else if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        currentFocusIndex--;
+                        if (currentFocusIndex < 0) currentFocusIndex = items.length - 1;
+                        updateSuggestionHighlight(items);
+                    } else if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (currentFocusIndex > -1 && currentFocusIndex < items.length) {
+                            items[currentFocusIndex].click(); // Select active item
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateSuggestionHighlight(items) {
+            for (let i = 0; i < items.length; i++) {
+                items[i].classList.remove('selected');
+            }
+            if (currentFocusIndex > -1) {
+                items[currentFocusIndex].classList.add('selected');
+                // Auto scroll list container structure to match focus items tracking
+                items[currentFocusIndex].scrollIntoView({ block: 'nearest' });
+            }
         }
 
         function startLiveTracking() {
@@ -201,7 +309,6 @@
                 navigator.geolocation.watchPosition((position) => {
                     userCoords = [position.coords.latitude, position.coords.longitude];
                     
-                    // FIXED: Injected inline SVG format for authentic navigator arrow shape
                     const arrowIcon = L.divIcon({
                         className: 'nav-arrow-container',
                         html: `
@@ -331,9 +438,11 @@
                     .then(res => res.json())
                     .then(data => {
                         box.innerHTML = '';
+                        currentFocusIndex = -1; // Reset dropdown selection index markers
+                        
                         if (data && data.length > 0) {
                             box.style.display = 'block';
-                            data.forEach(item => {
+                            data.forEach((item, idx) => {
                                 let div = document.createElement('div');
                                 div.className = 'suggestion-item';
                                 let cleanName = item.display_name.split(',')[0];
@@ -352,6 +461,7 @@
             destCoords = coords;
             document.getElementById('custom-search').value = displayName.split(',')[0];
             document.getElementById('suggestions-box').style.display = 'none';
+            keyboard.style.display = 'none'; // Clear layout view overlays
             
             if (destMarker) map.removeLayer(destMarker);
             destMarker = L.circleMarker(destCoords, { color: '#FF3366', radius: 5 }).addTo(map);
