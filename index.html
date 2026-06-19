@@ -3,9 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meta HUD - Open Armenia Map</title>
+    <title>Meta HUD - 2GIS Armenia Map</title>
     
-    <!-- Load 100% Free Open Source Map Engine (No API Keys needed) -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
@@ -31,7 +30,7 @@
             z-index: 1;
         }
 
-        /* Inverts open-source map tiles to high-contrast HUD transparent mode for glasses */
+        /* Transparent dark HUD filter applied over the 2GIS tile layouts */
         .leaflet-tile-container {
             filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
         }
@@ -40,7 +39,7 @@
             position: absolute;
             top: 15px;
             left: 15px;
-            z-index: 1000; /* Force overlay on top of map layers */
+            z-index: 1000; 
             display: flex;
             flex-direction: column;
             pointer-events: auto; 
@@ -102,7 +101,7 @@
 
     <div id="search-container">
         <div id="input-wrapper">
-            <input type="text" id="custom-search" placeholder="Search Armenia (e.g. Tumo)..." autocomplete="off" oninput="handleTyping()">
+            <input type="text" id="custom-search" placeholder="Search via 2GIS Data..." autocomplete="off" oninput="handleTyping()">
             <button id="custom-btn" onclick="triggerManualSearch()">Go</button>
         </div>
         <div id="suggestions-box"></div>
@@ -112,20 +111,21 @@
 
     <script type="text/javascript">
         let map;
-        let userCoords = [40.1792, 44.5152]; // Yerevan default fallback
+        let userCoords = [40.1792, 44.5152]; // Yerevan default
         let userMarker = null;
         let destMarker = null;
         let activeLine = null;
         let destCoords = null;
         let typingTimeout;
 
-        // Initialize free map framework
         function initMap() {
-            map = L.map('map', { zoomControl: false }).setView(userCoords, 15);
+            map = L.map('map', { zoomControl: false }).setView(userCoords, 16);
 
-            // Load free OpenStreetMap cartography tiles
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                maxZoom: 19
+            // CHANGED: Routing Leaflet directly into the official, open-access 2GIS map servers
+            L.tileLayer('https://tile{s}.maps.2gis.com/tiles?x={x}&y={y}&z={z}', {
+                subdomains: ['0', '1', '2', '3'],
+                maxZoom: 18,
+                attribution: '© 2GIS'
             }).addTo(map);
 
             startLiveTracking();
@@ -136,100 +136,9 @@
                 navigator.geolocation.watchPosition((position) => {
                     userCoords = [position.coords.latitude, position.coords.longitude];
                     
-                    // Update user position circle dot
                     if (!userMarker) {
                         userMarker = L.circleMarker(userCoords, {
                             color: '#FF3366', fillColor: '#FF3366', fillOpacity: 1, radius: 8
                         }).addTo(map);
                         map.setView(userCoords);
-                    } else {
-                        userMarker.setLatLng(userCoords);
-                    }
-
-                    // Dynamically recalculate direct route line as you walk
-                    if (destCoords) {
-                        if (activeLine) map.removeLayer(activeLine);
-                        activeLine = L.polyline([userCoords, destCoords], {
-                            color: '#00FFCC', weight: 5, opacity: 0.9
-                        }).addTo(map);
-                    }
-                }, null, { enableHighAccuracy: true });
-            }
-        }
-
-        // Real-time search suggestions engine biased strictly to Armenia bounds
-        function handleTyping() {
-            clearTimeout(typingTimeout);
-            const query = document.getElementById('custom-search').value.trim();
-            const box = document.getElementById('suggestions-box');
-
-            if (query.length < 2) {
-                box.style.display = 'none';
-                return;
-            }
-
-            typingTimeout = setTimeout(() => {
-                fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=am&q=${encodeURIComponent(query)}&limit=5`)
-                    .then(res => res.json())
-                    .then(data => {
-                        box.innerHTML = '';
-                        if (data && data.length > 0) {
-                            box.style.display = 'block';
-                            data.forEach(item => {
-                                let div = document.createElement('div');
-                                div.className = 'suggestion-item';
-                                div.innerText = item.display_name.split(',')[0] + (item.display_name.split(',')[1] ? ', ' + item.display_name.split(',')[1] : '');
-                                div.onclick = () => selectDestination([parseFloat(item.lat), parseFloat(item.lon)], item.display_name);
-                                box.appendChild(div);
-                            });
-                        } else {
-                            box.style.display = 'none';
-                        }
-                    }).catch(() => {});
-            }, 400);
-        }
-
-        function selectDestination(coords, displayName) {
-            destCoords = coords;
-            document.getElementById('custom-search').value = displayName.split(',')[0];
-            document.getElementById('suggestions-box').style.display = 'none';
-            drawHUDRoute();
-        }
-
-        function triggerManualSearch() {
-            const query = document.getElementById('custom-search').value.trim();
-            if (!query) return;
-            
-            fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=am&q=${encodeURIComponent(query)}&limit=1`)
-                .then(res => res.json())
-                .then(data => {
-                    if (data && data.length > 0) {
-                        destCoords = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
-                        drawHUDRoute();
-                    }
-                });
-        }
-
-        function drawHUDRoute() {
-            if (!destCoords) return;
-
-            if (destMarker) map.removeLayer(destMarker);
-            if (activeLine) map.removeLayer(activeLine);
-
-            // 1. Plot clear target pin
-            destMarker = L.marker(destCoords).addTo(map);
-
-            // 2. Draw active routing line connecting you to your target coordinates
-            activeLine = L.polyline([userCoords, destCoords], {
-                color: '#00FFCC', weight: 6, opacity: 0.9
-            }).addTo(map);
-
-            // Fit screen bounds to keep track visible
-            map.fitBounds(L.polyline([userCoords, destCoords]).getBounds(), { padding: [40, 40] });
-        }
-
-        // Fire on page run
-        window.onload = initMap;
-    </script>
-</body>
-</html>
+                    } else
