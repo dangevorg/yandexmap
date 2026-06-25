@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meta HUD - Traffic-Colored Multi-Route Navigator</title>
+    <title>Meta HUD - Fixed Traffic-Colored Multi-Route Navigator</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -267,7 +267,7 @@
             <div class="key" onclick="pressKey('a')">A</div><div class="key" onclick="pressKey('s')">S</div><div class="key" onclick="pressKey('d')">D</div><div class="key" onclick="pressKey('f')">F</div><div class="key" onclick="pressKey('g')">G</div><div class="key" onclick="pressKey('h')">H</div><div class="key" onclick="pressKey('j')">J</div><div class="key" onclick="pressKey('k')">K</div><div class="key" onclick="pressKey('l')">L</div>
         </div>
         <div class="keyboard-row">
-            <div class="key" onclick="pressKey('z') text">Z</div><div class="key" onclick="pressKey('x')">X</div><div class="key" onclick="pressKey('c')">C</div><div class="key" onclick="pressKey('v')">V</div><div class="key" onclick="pressKey('b')">B</div><div class="key" onclick="pressKey('n')">N</div><div class="key" onclick="pressKey('m')">M</div><div class="key wide" onclick="pressKey('backspace')">←</div>
+            <div class="key" onclick="pressKey('z')">Z</div><div class="key" onclick="pressKey('x')">X</div><div class="key" onclick="pressKey('c')">C</div><div class="key" onclick="pressKey('v')">V</div><div class="key" onclick="pressKey('b')">B</div><div class="key" onclick="pressKey('n')">N</div><div class="key" onclick="pressKey('m')">M</div><div class="key wide" onclick="pressKey('backspace')">←</div>
         </div>
         <div class="keyboard-row">
             <div class="key space" onclick="pressKey(' ')">Space</div><div class="key wide" style="background:#FF6600; color:#000;" onclick="pressKey('enter')">Done</div>
@@ -523,7 +523,7 @@
         function calculateRoute() {
             if (!destCoords) return;
 
-            const tomTomUrl = `https://api.tomtom.com/routing/1/calculateRoute/${userCoords[0]},${userCoords[1]}:${destCoords[0]},${destCoords[1]}/json?key=${TOMTOM_KEY}&traffic=true&departAt=now&maxAlternatives=2`;
+            const tomTomUrl = `https://api.tomtom.com/routing/1/calculateRoute/${userCoords[0]},./${userCoords[1]}:${destCoords[0]},${destCoords[1]}/json?key=${TOMTOM_KEY}&traffic=true&departAt=now&maxAlternatives=2`;
 
             fetch(tomTomUrl)
                 .then(res => res.json())
@@ -541,19 +541,20 @@
                             const distanceKm = (route.summary.lengthInMeters / 1000).toFixed(1);
                             const durationMin = Math.round(route.summary.travelTimeInSeconds / 60);
                             
-                            // FIXED: Calculate real-time congestion coefficient ratio thresholds
-                            const liveTime = route.summary.travelTimeInSeconds;
-                            const noTrafficTime = route.summary.noTrafficTravelTimeInSeconds || route.summary.historicTravelTimeInSeconds;
-                            const congestionRatio = liveTime / noTrafficTime;
+                            // FIXED: Use explicit live traffic delay seconds to calculate robust color thresholds across alternative branches
+                            const trafficDelay = route.summary.trafficDelayInSeconds || 0;
+                            const totalDrivingTime = route.summary.travelTimeInSeconds;
+                            
+                            // Find percentage of total driving spent idling in static traffic delays
+                            const delayRatio = trafficDelay / totalDrivingTime;
 
-                            // FIXED COLOR MATRIX RULES:
-                            let routeColor = '#00FF33'; // Light Green (All free, ratio < 1.15)
-                            if (congestionRatio >= 1.15 && congestionRatio < 1.35) {
-                                routeColor = '#FFFF00'; // Yellow (A little traffic)
-                            } else if (congestionRatio >= 1.35 && congestionRatio < 1.65) {
-                                routeColor = '#FF3333'; // Red (Bad traffic)
-                            } else if (congestionRatio >= 1.65) {
-                                routeColor = '#8B0000'; // Dark Red (Awful traffic)
+                            let routeColor = '#00FF33'; // Light Green: Little to no structural delays
+                            if (delayRatio > 0.05 && delayRatio <= 0.18) {
+                                routeColor = '#FFFF00'; // Yellow: Noticeable delays
+                            } else if (delayRatio > 0.18 && delayRatio <= 0.35) {
+                                routeColor = '#FF3333'; // Red: Solid traffic jam
+                            } else if (delayRatio > 0.35) {
+                                routeColor = '#8B0000'; // Dark Red: Complete standstill
                             }
 
                             let timeText = `${durationMin}m`;
@@ -569,7 +570,6 @@
 
                             const coordinates = route.legs[0].points.map(p => [p.latitude, p.longitude]);
                             
-                            // Draws selected path fully saturated with computed traffic colors; non-selected tracks fade to background opacity benchmarks
                             const polyline = L.polyline(coordinates, {
                                 color: routeColor,
                                 weight: idx === currentlySelectedRouteIndex ? 4 : 3,
