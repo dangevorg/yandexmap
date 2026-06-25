@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meta HUD - Strict Armenia Filter Navigator</title>
+    <title>Meta HUD - Strict Armenia Forced Navigator</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -535,8 +535,14 @@
             if (query.length < 2) { box.style.display = 'none'; return; }
 
             typingTimeout = setTimeout(() => {
-                // Requesting a larger batch (20 items) to guarantee we catch local data points
-                fetch(`https://nominatim.openstreetmap.org/search?format=json&viewbox=${armeniaViewbox}&bounded=0&q=${encodeURIComponent(query)}&limit=20`)
+                // FIXED CRITICAL BACKGROUND APPEND STRATEGY:
+                // If query length is under 4 characters, force ", Armenia" onto backend fetch string
+                let forcedQuery = query;
+                if (query.length <= 3) {
+                    forcedQuery += ", Armenia";
+                }
+
+                fetch(`https://nominatim.openstreetmap.org/search?format=json&viewbox=${armeniaViewbox}&bounded=0&q=${encodeURIComponent(forcedQuery)}&limit=20`)
                     .then(res => res.json())
                     .then(data => {
                         box.innerHTML = '';
@@ -545,7 +551,6 @@
                         if (data && data.length > 0) {
                             box.style.display = 'block';
 
-                            // FIXED CRITICAL BUCKETING ARCHITECTURE
                             let armeniaBucket = [];
                             let globalBucket = [];
 
@@ -563,7 +568,6 @@
                                 }
                             });
 
-                            // Sub-sorting Armenia matches by name match priority
                             armeniaBucket.sort((a, b) => {
                                 const qStr = query.toLowerCase();
                                 const nameA = (a.display_name.split(',')[0] || '').toLowerCase();
@@ -571,7 +575,6 @@
                                 return nameB.startsWith(qStr) - nameA.startsWith(qStr);
                             });
 
-                            // Recompile final combined list: Armenia Always Wins
                             const finalizedResults = armeniaBucket.concat(globalBucket).slice(0, 5);
 
                             finalizedResults.forEach((item) => {
