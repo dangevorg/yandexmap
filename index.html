@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meta HUD - Multi-Route Traffic Navigator</title>
+    <title>Meta HUD - Traffic-Colored Multi-Route Navigator</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -47,7 +47,7 @@
 
         #search-container {
             position: absolute;
-            top: 135px; /* Pushed further down to accommodate the multi-route HUD layout */
+            top: 135px; 
             left: 15px;
             z-index: 1000; 
             display: flex;
@@ -187,7 +187,6 @@
         .stat-val { font-size: 20px; font-weight: bold; color: #FF6600; } 
         .stat-lbl { font-size: 11px; color: #888888; text-transform: uppercase; margin-top: 2px; }
 
-        /* NEW: Multi-Route Alternative Selector HUD Panel */
         #route-options-panel {
             position: absolute;
             top: 72px;
@@ -197,7 +196,7 @@
             background: rgba(5, 5, 5, 0.85);
             border-bottom: 1px solid #222222;
             z-index: 2000;
-            display: none; /* Only reveals when routing targets exist */
+            display: none; 
             justify-content: center;
             align-items: center;
             gap: 15px;
@@ -268,7 +267,7 @@
             <div class="key" onclick="pressKey('a')">A</div><div class="key" onclick="pressKey('s')">S</div><div class="key" onclick="pressKey('d')">D</div><div class="key" onclick="pressKey('f')">F</div><div class="key" onclick="pressKey('g')">G</div><div class="key" onclick="pressKey('h')">H</div><div class="key" onclick="pressKey('j')">J</div><div class="key" onclick="pressKey('k')">K</div><div class="key" onclick="pressKey('l')">L</div>
         </div>
         <div class="keyboard-row">
-            <div class="key" onclick="pressKey('z')">Z</div><div class="key" onclick="pressKey('x')">X</div><div class="key" onclick="pressKey('c')">C</div><div class="key" onclick="pressKey('v')">V</div><div class="key" onclick="pressKey('b')">B</div><div class="key" onclick="pressKey('n')">N</div><div class="key" onclick="pressKey('m')">M</div><div class="key wide" onclick="pressKey('backspace')">←</div>
+            <div class="key" onclick="pressKey('z') text">Z</div><div class="key" onclick="pressKey('x')">X</div><div class="key" onclick="pressKey('c')">C</div><div class="key" onclick="pressKey('v')">V</div><div class="key" onclick="pressKey('b')">B</div><div class="key" onclick="pressKey('n')">N</div><div class="key" onclick="pressKey('m')">M</div><div class="key wide" onclick="pressKey('backspace')">←</div>
         </div>
         <div class="keyboard-row">
             <div class="key space" onclick="pressKey(' ')">Space</div><div class="key wide" style="background:#FF6600; color:#000;" onclick="pressKey('enter')">Done</div>
@@ -286,7 +285,6 @@
         let destMarker = null;
         let destCoords = null;
         
-        // NEW: Multi-route layer and data arrays
         let routeLayersArray = [];
         let fetchedRoutesData = [];
         let currentlySelectedRouteIndex = 0;
@@ -522,7 +520,6 @@
             }
         }
 
-        // FIXED: Requests up to 3 live alternative paths from TomTom
         function calculateRoute() {
             if (!destCoords) return;
 
@@ -532,7 +529,6 @@
                 .then(res => res.json())
                 .then(data => {
                     if (data.routes && data.routes.length > 0) {
-                        // Clear existing tracks
                         routeLayersArray.forEach(l => map.removeLayer(l));
                         routeLayersArray = [];
                         fetchedRoutesData = data.routes;
@@ -541,11 +537,25 @@
                         panel.innerHTML = '';
                         panel.style.display = 'flex';
 
-                        // Build selection chips for each track option
                         data.routes.forEach((route, idx) => {
                             const distanceKm = (route.summary.lengthInMeters / 1000).toFixed(1);
                             const durationMin = Math.round(route.summary.travelTimeInSeconds / 60);
                             
+                            // FIXED: Calculate real-time congestion coefficient ratio thresholds
+                            const liveTime = route.summary.travelTimeInSeconds;
+                            const noTrafficTime = route.summary.noTrafficTravelTimeInSeconds || route.summary.historicTravelTimeInSeconds;
+                            const congestionRatio = liveTime / noTrafficTime;
+
+                            // FIXED COLOR MATRIX RULES:
+                            let routeColor = '#00FF33'; // Light Green (All free, ratio < 1.15)
+                            if (congestionRatio >= 1.15 && congestionRatio < 1.35) {
+                                routeColor = '#FFFF00'; // Yellow (A little traffic)
+                            } else if (congestionRatio >= 1.35 && congestionRatio < 1.65) {
+                                routeColor = '#FF3333'; // Red (Bad traffic)
+                            } else if (congestionRatio >= 1.65) {
+                                routeColor = '#8B0000'; // Dark Red (Awful traffic)
+                            }
+
                             let timeText = `${durationMin}m`;
                             if (durationMin >= 60) {
                                 timeText = `${Math.floor(durationMin / 60)}h ${durationMin % 60}m`;
@@ -557,19 +567,19 @@
                             chip.onclick = () => selectActiveRouteIndex(idx);
                             panel.appendChild(chip);
 
-                            // Draw the paths: green highlight for the selected choice, dull gray for alternatives
                             const coordinates = route.legs[0].points.map(p => [p.latitude, p.longitude]);
+                            
+                            // Draws selected path fully saturated with computed traffic colors; non-selected tracks fade to background opacity benchmarks
                             const polyline = L.polyline(coordinates, {
-                                color: idx === currentlySelectedRouteIndex ? '#00FF33' : '#555555',
+                                color: routeColor,
                                 weight: idx === currentlySelectedRouteIndex ? 4 : 3,
-                                opacity: idx === currentlySelectedRouteIndex ? 0.95 : 0.4,
+                                opacity: idx === currentlySelectedRouteIndex ? 0.95 : 0.25,
                                 zIndexOffset: idx === currentlySelectedRouteIndex ? 1000 : 0
                             }).addTo(map);
 
                             routeLayersArray.push(polyline);
                         });
 
-                        // Set dashboard stats using the chosen index parameters
                         const activeRoute = fetchedRoutesData[currentlySelectedRouteIndex];
                         const activeDist = (activeRoute.summary.lengthInMeters / 1000).toFixed(1);
                         const activeDuration = Math.round(activeRoute.summary.travelTimeInSeconds / 60);
@@ -589,7 +599,6 @@
                 }).catch(() => {});
         }
 
-        // FIXED: Shifts active route focus and triggers geometry updates
         function selectActiveRouteIndex(index) {
             currentlySelectedRouteIndex = index;
             calculateRoute();
@@ -680,7 +689,7 @@
 
         function selectDestination(coords, displayName) {
             destCoords = coords;
-            currentlySelectedRouteIndex = 0; // Reset focus to route choice A
+            currentlySelectedRouteIndex = 0; 
             document.getElementById('custom-search').value = displayName;
             document.getElementById('suggestions-box').style.display = 'none';
             keyboard.style.display = 'none'; 
