@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meta HUD - Traffic Multi-Route Navigator</title>
+    <title>Meta HUD - Precision Traffic Multi-Route Navigator</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -277,7 +277,6 @@
     <div id="map"></div>
 
     <script type="text/javascript">
-        // READY: Integrated Your New Active TomTom Key
         const TOMTOM_KEY = "5ssd47Hlp3FdhhUDhP8xUtmBHzOu2iOU"; 
 
         let map;
@@ -542,17 +541,21 @@
                             const distanceKm = (route.summary.lengthInMeters / 1000).toFixed(1);
                             const durationMin = Math.round(route.summary.travelTimeInSeconds / 60);
                             
-                            const trafficDelay = route.summary.trafficDelayInSeconds || 0;
-                            const totalDrivingTime = route.summary.travelTimeInSeconds;
-                            const delayRatio = trafficDelay / totalDrivingTime;
+                            // FIXED TIME INFLATION COMPARISON MATH:
+                            // We compare real-time driving duration directly with empty-road freeflow duration thresholds.
+                            const liveDrivingTime = route.summary.travelTimeInSeconds;
+                            const baselineFreeflowTime = route.summary.noTrafficTravelTimeInSeconds || route.summary.historicTravelTimeInSeconds || liveDrivingTime;
+                            
+                            // Ratio multiplier factor (e.g. 1.20 = 20% total time penalty added by slow street speeds)
+                            const structuralDelayRatio = liveDrivingTime / baselineFreeflowTime;
 
-                            let routeColor = '#00FF33'; 
-                            if (delayRatio > 0.05 && delayRatio <= 0.18) {
-                                routeColor = '#FFFF00'; 
-                            } else if (delayRatio > 0.18 && delayRatio <= 0.35) {
-                                routeColor = '#FF3333'; 
-                            } else if (delayRatio > 0.35) {
-                                routeColor = '#8B0000'; 
+                            let routeColor = '#00FF33'; // Light Green: Flowing perfectly (under 6% delay)
+                            if (structuralDelayRatio > 1.06 && structuralDelayRatio <= 1.22) {
+                                routeColor = '#FFFF00'; // Yellow: Moderate slowing / light traffic
+                            } else if (structuralDelayRatio > 1.22 && structuralDelayRatio <= 1.45) {
+                                routeColor = '#FF3333'; // Red: Heavy delay bottleneck
+                            } else if (structuralDelayRatio > 1.45) {
+                                routeColor = '#8B0000'; // Dark Red: Near complete gridlock / crawling speeds
                             }
 
                             let timeText = `${durationMin}m`;
