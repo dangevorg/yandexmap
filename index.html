@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meta HUD - TomTom Live Traffic Navigator</title>
+    <title>Meta HUD - Multi-Route Traffic Navigator</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -41,9 +41,13 @@
             filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
         }
 
+        .traffic-layer {
+            filter: brightness(130%) contrast(120%);
+        }
+
         #search-container {
             position: absolute;
-            top: 85px; 
+            top: 135px; /* Pushed further down to accommodate the multi-route HUD layout */
             left: 15px;
             z-index: 1000; 
             display: flex;
@@ -182,6 +186,41 @@
         .stat-element { text-align: center; }
         .stat-val { font-size: 20px; font-weight: bold; color: #FF6600; } 
         .stat-lbl { font-size: 11px; color: #888888; text-transform: uppercase; margin-top: 2px; }
+
+        /* NEW: Multi-Route Alternative Selector HUD Panel */
+        #route-options-panel {
+            position: absolute;
+            top: 72px;
+            left: 0;
+            width: 600px;
+            height: 50px;
+            background: rgba(5, 5, 5, 0.85);
+            border-bottom: 1px solid #222222;
+            z-index: 2000;
+            display: none; /* Only reveals when routing targets exist */
+            justify-content: center;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .route-chip {
+            padding: 6px 12px;
+            background: #151515;
+            border: 1px solid #444444;
+            color: #888888;
+            font-size: 12px;
+            font-weight: bold;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .route-chip.selected-route {
+            background: #FF6600 !important;
+            color: #000000 !important;
+            border-color: #FF6600 !important;
+            box-shadow: 0 0 8px rgba(255, 102, 0, 0.5);
+        }
     </style>
 </head>
 <body>
@@ -200,6 +239,8 @@
             <div class="stat-lbl">Distance</div>
         </div>
     </div>
+
+    <div id="route-options-panel"></div>
 
     <div id="search-container">
         <div id="input-wrapper">
@@ -237,7 +278,6 @@
     <div id="map"></div>
 
     <script type="text/javascript">
-        // READY: Integrated Your Custom Active Live-Traffic Routing Token Key
         const TOMTOM_KEY = "jeXPT9KCLIJWZ5S3Hy8aHjuK6h2Sokoj"; 
 
         let map;
@@ -245,7 +285,13 @@
         let userMarker = null;
         let destMarker = null;
         let destCoords = null;
-        let activeRouteLine = null;
+        
+        // NEW: Multi-route layer and data arrays
+        let routeLayersArray = [];
+        let fetchedRoutesData = [];
+        let currentlySelectedRouteIndex = 0;
+
+        let trafficTileLayer = null; 
         let typingTimeout;
         let isLockedView = false;
         let userHeading = 0;
@@ -262,6 +308,13 @@
         function initMap() {
             map = L.map('map', { zoomControl: false }).setView(userCoords, 16);
             L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+
+            trafficTileLayer = L.tileLayer(`https://{s}.api.tomtom.com/traffic/map/4/tile/flow/absolute/{z}/{x}/{y}.png?key=${TOMTOM_KEY}`, {
+                subdomains: ['a', 'b', 'c', 'd'],
+                opacity: 0.8,
+                maxZoom: 18,
+                className: 'traffic-layer'
+            }).addTo(map);
 
             startLiveTracking();
             startCompassTracking();
@@ -469,59 +522,77 @@
             }
         }
 
+        // FIXED: Requests up to 3 live alternative paths from TomTom
         function calculateRoute() {
             if (!destCoords) return;
 
-            if (TOMTOM_KEY === "YOUR_TOMTOM_KEY" || TOMTOM_KEY === "") {
-                const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${userCoords[1]},${userCoords[0]};${destCoords[1]},${destCoords[0]}?geometries=geojson`;
-                fetch(osrmUrl)
-                    .then(res => res.json())
-                    .then(data => {
-                        if (data.routes && data.routes.length > 0) {
-                            processRouteGeometry(data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]), data.routes[0].distance / 1000, Math.round(data.routes[0].duration / 60));
-                        }
-                    });
-                return;
-            }
-
-            const tomTomUrl = `https://api.tomtom.com/routing/1/calculateRoute/${userCoords[0]},${userCoords[1]}:${destCoords[0]},${destCoords[1]}/json?key=${TOMTOM_KEY}&traffic=true&departAt=now`;
+            const tomTomUrl = `https://api.tomtom.com/routing/1/calculateRoute/${userCoords[0]},${userCoords[1]}:${destCoords[0]},${destCoords[1]}/json?key=${TOMTOM_KEY}&traffic=true&departAt=now&maxAlternatives=2`;
 
             fetch(tomTomUrl)
                 .then(res => res.json())
                 .then(data => {
                     if (data.routes && data.routes.length > 0) {
-                        const route = data.routes[0];
-                        const distanceKm = (route.summary.lengthInMeters / 1000).toFixed(1);
-                        const durationMin = Math.round(route.summary.travelTimeInSeconds / 60);
-                        const coordinates = route.legs[0].points.map(p => [p.latitude, p.longitude]);
-                        
-                        processRouteGeometry(coordinates, distanceKm, durationMin);
+                        // Clear existing tracks
+                        routeLayersArray.forEach(l => map.removeLayer(l));
+                        routeLayersArray = [];
+                        fetchedRoutesData = data.routes;
+
+                        const panel = document.getElementById('route-options-panel');
+                        panel.innerHTML = '';
+                        panel.style.display = 'flex';
+
+                        // Build selection chips for each track option
+                        data.routes.forEach((route, idx) => {
+                            const distanceKm = (route.summary.lengthInMeters / 1000).toFixed(1);
+                            const durationMin = Math.round(route.summary.travelTimeInSeconds / 60);
+                            
+                            let timeText = `${durationMin}m`;
+                            if (durationMin >= 60) {
+                                timeText = `${Math.floor(durationMin / 60)}h ${durationMin % 60}m`;
+                            }
+
+                            const chip = document.createElement('div');
+                            chip.className = `route-chip ${idx === currentlySelectedRouteIndex ? 'selected-route' : ''}`;
+                            chip.innerText = `Route ${String.fromCharCode(65 + idx)} (${timeText})`;
+                            chip.onclick = () => selectActiveRouteIndex(idx);
+                            panel.appendChild(chip);
+
+                            // Draw the paths: green highlight for the selected choice, dull gray for alternatives
+                            const coordinates = route.legs[0].points.map(p => [p.latitude, p.longitude]);
+                            const polyline = L.polyline(coordinates, {
+                                color: idx === currentlySelectedRouteIndex ? '#00FF33' : '#555555',
+                                weight: idx === currentlySelectedRouteIndex ? 4 : 3,
+                                opacity: idx === currentlySelectedRouteIndex ? 0.95 : 0.4,
+                                zIndexOffset: idx === currentlySelectedRouteIndex ? 1000 : 0
+                            }).addTo(map);
+
+                            routeLayersArray.push(polyline);
+                        });
+
+                        // Set dashboard stats using the chosen index parameters
+                        const activeRoute = fetchedRoutesData[currentlySelectedRouteIndex];
+                        const activeDist = (activeRoute.summary.lengthInMeters / 1000).toFixed(1);
+                        const activeDuration = Math.round(activeRoute.summary.travelTimeInSeconds / 60);
+
+                        let displayTime = `${activeDuration} min`;
+                        if (activeDuration >= 60) {
+                            displayTime = `${Math.floor(activeDuration / 60)}h ${activeDuration % 60}m`;
+                        }
+
+                        document.getElementById('hud-distance').innerText = `${activeDist} km`;
+                        document.getElementById('hud-remaining').innerText = displayTime;
+
+                        if (!isLockedView && routeLayersArray[currentlySelectedRouteIndex]) {
+                            map.fitBounds(routeLayersArray[currentlySelectedRouteIndex].getBounds(), { padding: [40, 40] });
+                        }
                     }
                 }).catch(() => {});
         }
 
-        function processRouteGeometry(leafCoordinates, distanceKm, durationMin) {
-            let displayTime = `${durationMin} min`;
-            if (durationMin >= 60) {
-                const hours = Math.floor(durationMin / 60);
-                const remainingMins = durationMin % 60;
-                displayTime = remainingMins > 0 ? `${hours}h ${remainingMins}m` : `${hours}h`;
-            }
-
-            document.getElementById('hud-distance').innerText = `${distanceKm} km`;
-            document.getElementById('hud-remaining').innerText = displayTime;
-
-            if (activeRouteLine) map.removeLayer(activeRouteLine);
-
-            activeRouteLine = L.polyline(leafCoordinates, {
-                color: '#00FF33',
-                weight: 3, 
-                opacity: 0.95
-            }).addTo(map);
-
-            if (!isLockedView) {
-                map.fitBounds(activeRouteLine.getBounds(), { padding: [40, 40] });
-            }
+        // FIXED: Shifts active route focus and triggers geometry updates
+        function selectActiveRouteIndex(index) {
+            currentlySelectedRouteIndex = index;
+            calculateRoute();
         }
 
         function startTripTimer() {
@@ -609,6 +680,7 @@
 
         function selectDestination(coords, displayName) {
             destCoords = coords;
+            currentlySelectedRouteIndex = 0; // Reset focus to route choice A
             document.getElementById('custom-search').value = displayName;
             document.getElementById('suggestions-box').style.display = 'none';
             keyboard.style.display = 'none'; 
@@ -631,6 +703,7 @@
                     if (data && data.length > 0) {
                         let name = data[0].display_name.split(',')[0];
                         destCoords = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+                        currentlySelectedRouteIndex = 0;
                         if (destMarker) map.removeLayer(destMarker);
                         destMarker = L.circleMarker(destCoords, { color: '#FF3366', radius: 5 }).addTo(map);
                         
