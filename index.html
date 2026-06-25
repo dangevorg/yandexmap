@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meta HUD - Keyboard & Arrow Navigator</title>
+    <title>Meta HUD - Gesture & History Navigator</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -100,13 +100,20 @@
             cursor: pointer;
         }
         
-        /* Highlighted style when navigating suggestions with arrow keys */
         .suggestion-item.selected, .suggestion-item:hover { 
             background: #222222; 
             color: #FF6600; 
         }
 
-        /* NEW: On-Screen Virtual Keyboard Container styling */
+        /* Style marker specific for historical items */
+        .history-item {
+            color: #888888;
+            font-style: italic;
+        }
+        .history-item::before {
+            content: "🕒 ";
+        }
+
         #virtual-keyboard {
             position: absolute;
             bottom: 0;
@@ -117,7 +124,7 @@
             padding: 10px;
             box-sizing: border-box;
             z-index: 3000;
-            display: none; /* Hidden until search bar focus */
+            display: none; 
             flex-direction: column;
             gap: 5px;
         }
@@ -193,7 +200,7 @@
 
     <div id="search-container">
         <div id="input-wrapper">
-            <input type="text" id="custom-search" placeholder="Search places..." autocomplete="off" oninput="handleTyping()">
+            <input type="text" id="custom-search" placeholder="Search places..." autocomplete="off" oninput="handleTyping()" onfocus="showRecentHistory()">
             <button id="custom-btn" class="btn" onclick="triggerManualSearch()">Go</button>
             <button id="lock-btn" class="btn" onclick="toggleLockView()">Follow</button>
         </div>
@@ -233,10 +240,7 @@
         let tripStartTime = null;
         let elapsedInterval = null;
 
-        // Arrow navigation active tracker index tracking
         let currentFocusIndex = -1;
-        let suggestionItemsData = [];
-
         const armeniaViewbox = "43.4,41.4,46.6,38.8";
 
         function initMap() {
@@ -245,10 +249,9 @@
 
             startLiveTracking();
             startCompassTracking();
-            setupKeyboardEventListeners();
+            setupGestureEventListeners();
         }
 
-        // Handle opening and closing the virtual overlay when searching
         const searchInput = document.getElementById('custom-search');
         const keyboard = document.getElementById('virtual-keyboard');
         
@@ -257,37 +260,47 @@
         function pressKey(char) {
             if (char === 'backspace') {
                 searchInput.value = searchInput.value.slice(0, -1);
+                handleTyping();
             } else if (char === 'enter') {
                 keyboard.style.display = 'none';
                 triggerManualSearch();
             } else {
                 searchInput.value += char;
+                handleTyping();
             }
-            handleTyping();
         }
 
-        // NEW: Intercept hard key listeners for Arrow Key navigation controls
-        function setupKeyboardEventListeners() {
+        // FIXED: Maps Meta neural band wristband gestures to interface movements
+        function setupGestureEventListeners() {
             document.addEventListener('keydown', (e) => {
                 const box = document.getElementById('suggestions-box');
                 const items = box.getElementsByClassName('suggestion-item');
                 
+                // 1. Swipe Up/Down or Left/Right movements cycle through choices
                 if (box.style.display === 'block' && items.length > 0) {
-                    if (e.key === 'ArrowDown') {
+                    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
                         e.preventDefault();
                         currentFocusIndex++;
                         if (currentFocusIndex >= items.length) currentFocusIndex = 0;
                         updateSuggestionHighlight(items);
-                    } else if (e.key === 'ArrowUp') {
+                    } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
                         e.preventDefault();
                         currentFocusIndex--;
                         if (currentFocusIndex < 0) currentFocusIndex = items.length - 1;
                         updateSuggestionHighlight(items);
-                    } else if (e.key === 'Enter') {
+                    } 
+                    // 2. Double Pinch / Index Pinch acts as an Enter selection trigger
+                    else if (e.key === 'Enter') {
                         e.preventDefault();
                         if (currentFocusIndex > -1 && currentFocusIndex < items.length) {
-                            items[currentFocusIndex].click(); // Select active item
+                            items[currentFocusIndex].click(); 
                         }
+                    }
+                } else {
+                    // 3. Wrist Flick/Shake gesture maps to Escape to instantly toggle 3D lock tracking
+                    if (e.key === 'Escape') {
+                        e.preventDefault();
+                        toggleLockView();
                     }
                 }
             });
@@ -299,9 +312,47 @@
             }
             if (currentFocusIndex > -1) {
                 items[currentFocusIndex].classList.add('selected');
-                // Auto scroll list container structure to match focus items tracking
                 items[currentFocusIndex].scrollIntoView({ block: 'nearest' });
             }
+        }
+
+        // NEW: Pulls and prints last 3 cached history positions onto dropdown
+        function showRecentHistory() {
+            if (searchInput.value.trim().length > 0) return;
+            
+            const box = document.getElementById('suggestions-box');
+            let history = JSON.parse(localStorage.getItem('nav_history')) || [];
+            
+            if (history.length === 0) {
+                box.style.display = 'none';
+                return;
+            }
+
+            box.innerHTML = '';
+            currentFocusIndex = -1;
+            box.style.display = 'block';
+
+            history.forEach(item => {
+                let div = document.createElement('div');
+                div.className = 'suggestion-item history-item';
+                div.innerText = item.name;
+                div.onclick = () => selectDestination(item.coords, item.name);
+                box.appendChild(div);
+            });
+        }
+
+        // NEW: Evaluates successful targets and logs them inside localStorage index cache
+        function saveToHistory(name, coords) {
+            let history = JSON.parse(localStorage.getItem('nav_history')) || [];
+            
+            // Deduplicate entry logs
+            history = history.filter(item => item.name !== name);
+            
+            // Push to head and trim stack to 3 items max
+            history.unshift({ name: name, coords: coords });
+            if (history.length > 3) history.pop();
+            
+            localStorage.setItem('nav_history', JSON.stringify(history));
         }
 
         function startLiveTracking() {
@@ -431,6 +482,11 @@
             clearTimeout(typingTimeout);
             const query = document.getElementById('custom-search').value.trim();
             const box = document.getElementById('suggestions-box');
+            
+            if (query.length === 0) {
+                showRecentHistory();
+                return;
+            }
             if (query.length < 2) { box.style.display = 'none'; return; }
 
             typingTimeout = setTimeout(() => {
@@ -438,18 +494,18 @@
                     .then(res => res.json())
                     .then(data => {
                         box.innerHTML = '';
-                        currentFocusIndex = -1; // Reset dropdown selection index markers
+                        currentFocusIndex = -1; 
                         
                         if (data && data.length > 0) {
                             box.style.display = 'block';
-                            data.forEach((item, idx) => {
+                            data.forEach((item) => {
                                 let div = document.createElement('div');
                                 div.className = 'suggestion-item';
                                 let cleanName = item.display_name.split(',')[0];
                                 let cleanContext = item.display_name.split(',')[1] ? ', ' + item.display_name.split(',')[1] : '';
                                 div.innerText = cleanName + cleanContext;
                                 
-                                div.onclick = () => selectDestination([parseFloat(item.lat), parseFloat(item.lon)], item.display_name);
+                                div.onclick = () => selectDestination([parseFloat(item.lat), parseFloat(item.lon)], cleanName);
                                 box.appendChild(div);
                             });
                         } else { box.style.display = 'none'; }
@@ -459,13 +515,14 @@
 
         function selectDestination(coords, displayName) {
             destCoords = coords;
-            document.getElementById('custom-search').value = displayName.split(',')[0];
+            document.getElementById('custom-search').value = displayName;
             document.getElementById('suggestions-box').style.display = 'none';
-            keyboard.style.display = 'none'; // Clear layout view overlays
+            keyboard.style.display = 'none'; 
             
             if (destMarker) map.removeLayer(destMarker);
             destMarker = L.circleMarker(destCoords, { color: '#FF3366', radius: 5 }).addTo(map);
 
+            saveToHistory(displayName, coords); // Cache successful search items
             startTripTimer(); 
             calculateRoute();
         }
@@ -478,9 +535,12 @@
                 .then(res => res.json())
                 .then(data => {
                     if (data && data.length > 0) {
+                        let name = data[0].display_name.split(',')[0];
                         destCoords = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
                         if (destMarker) map.removeLayer(destMarker);
                         destMarker = L.circleMarker(destCoords, { color: '#FF3366', radius: 5 }).addTo(map);
+                        
+                        saveToHistory(name, destCoords);
                         startTripTimer();
                         calculateRoute();
                     }
