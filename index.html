@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meta HUD - Priority Armenia Navigator</title>
+    <title>Meta HUD - Smart Partial Match Navigator</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -535,7 +535,8 @@
             if (query.length < 2) { box.style.display = 'none'; return; }
 
             typingTimeout = setTimeout(() => {
-                fetch(`https://nominatim.openstreetmap.org/search?format=json&viewbox=${armeniaViewbox}&bounded=0&q=${encodeURIComponent(query)}&limit=10`)
+                // Fetching up to 15 entries to give our sorting filter maximum material to work with
+                fetch(`https://nominatim.openstreetmap.org/search?format=json&viewbox=${armeniaViewbox}&bounded=0&q=${encodeURIComponent(query)}&limit=15`)
                     .then(res => res.json())
                     .then(data => {
                         box.innerHTML = '';
@@ -544,14 +545,27 @@
                         if (data && data.length > 0) {
                             box.style.display = 'block';
 
-                            // FIXED: Sort results so anything inside Armenia is forced to the top
+                            // FIXED: Ultra-aggressive text classification filter sorting rules
                             data.sort((a, b) => {
+                                const qStr = query.toLowerCase();
+                                const nameA = (a.display_name.split(',')[0] || '').toLowerCase();
+                                const nameB = (b.display_name.split(',')[0] || '').toLowerCase();
+
                                 const aInArmenia = a.display_name.toLowerCase().includes('armenia') || a.display_name.includes('հայաստան') || a.display_name.toLowerCase().includes('երևան');
                                 const bInArmenia = b.display_name.toLowerCase().includes('armenia') || b.display_name.includes('հայաստան') || b.display_name.toLowerCase().includes('երևան');
-                                return bInArmenia - aInArmenia; 
+
+                                // Rule 1: Prioritize localized geographical context match layers explicitly first
+                                if (aInArmenia !== bInArmenia) return bInArmenia - aInArmenia;
+
+                                // Rule 2: If both are local, force true partial matches (e.g., "tum" -> "tumo") directly to the top 
+                                const aStarts = nameA.startsWith(qStr);
+                                const bStarts = nameB.startsWith(qStr);
+                                if (aStarts !== bStarts) return bStarts - aStarts;
+
+                                return 0;
                             });
 
-                            // Display only the top 5 sorted results
+                            // Slice clean top 5 choices straight to display rows
                             data.slice(0, 5).forEach((item) => {
                                 let div = document.createElement('div');
                                 div.className = 'suggestion-item';
@@ -564,7 +578,7 @@
                             });
                         } else { box.style.display = 'none'; }
                     }).catch(() => {});
-            }, 400);
+            }, 300); // Shrunk fallback timeout speed down to 300ms for fast feedback lookups
         }
 
         function selectDestination(coords, displayName) {
