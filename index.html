@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meta HUD - Voice, Gesture & History Navigator</title>
+    <title>Meta HUD - 10-Item History Navigator</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -53,23 +53,23 @@
 
         #input-wrapper {
             display: flex;
-            gap: 5px;
+            gap: 4px;
         }
 
         #custom-search {
-            width: 140px;
+            width: 120px;
             height: 32px;
             background: #111111;
             border: 1px solid #444444;
             color: #FFFFFF;
-            padding: 0 10px;
-            font-size: 14px;
+            padding: 0 8px;
+            font-size: 13px;
             border-radius: 4px;
         }
 
         .btn {
             height: 34px;
-            padding: 0 10px;
+            padding: 0 8px;
             border: none;
             font-weight: bold;
             border-radius: 4px;
@@ -82,12 +82,11 @@
 
         #custom-btn { background: #333333; color: #FFFFFF; border: 1px solid #555555; }
         
-        /* NEW: Microphone Button Styling */
         #mic-btn {
             background: #222222;
             color: #FFFFFF;
             border: 1px solid #444444;
-            width: 36px;
+            width: 32px;
             padding: 0;
         }
         
@@ -95,6 +94,19 @@
             background: #FF3333 !important;
             border-color: #FF3333;
             animation: pulse-mic 1.2s infinite;
+        }
+
+        /* NEW: History Button Style Layout */
+        #history-btn {
+            background: #222222;
+            color: #888888;
+            border: 1px solid #444444;
+            width: 32px;
+            padding: 0;
+        }
+        .active-history-btn {
+            color: #FF6600 !important;
+            border-color: #FF6600 !important;
         }
 
         @keyframes pulse-mic {
@@ -107,10 +119,10 @@
         .active-lock { background: #FF6600 !important; color: #000000 !important; box-shadow: 0 0 10px rgba(255, 102, 0, 0.6); }
 
         #suggestions-box {
-            width: 240px;
+            width: 250px;
             background: #111111;
             border: 1px solid #333333;
-            max-height: 150px;
+            max-height: 180px;
             overflow-y: auto;
             border-radius: 4px;
             margin-top: 2px;
@@ -130,7 +142,7 @@
             color: #FF6600; 
         }
 
-        .history-item { color: #888888; font-style: italic; }
+        .history-item { color: #AA6600; }
         .history-item::before { content: "🕒 "; }
 
         #virtual-keyboard {
@@ -192,10 +204,15 @@
 
     <div id="search-container">
         <div id="input-wrapper">
-            <input type="text" id="custom-search" placeholder="Search places..." autocomplete="off" oninput="handleTyping()" onfocus="showRecentHistory()">
-            <!-- NEW: Microphone Icon Button Trigger -->
+            <input type="text" id="custom-search" placeholder="Search..." autocomplete="off" oninput="handleTyping()">
+            
+            <!-- NEW: Dedicated History Log Trigger Button -->
+            <button id="history-btn" class="btn" onclick="toggleHistoryMenu()" title="Search History">
+                🕒
+            </button>
+            
             <button id="mic-btn" class="btn" onclick="toggleVoiceDictation()" title="Voice Search">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/>
                 </svg>
             </button>
@@ -239,9 +256,9 @@
         let elapsedInterval = null;
 
         let currentFocusIndex = -1;
+        let isHistoryOpen = false; // Tracks state of custom history sub-menu
         const armeniaViewbox = "43.4,41.4,46.6,38.8";
 
-        // Speech Recognition Initializations
         let recognition = null;
         let isListening = false;
 
@@ -258,7 +275,10 @@
         const searchInput = document.getElementById('custom-search');
         const keyboard = document.getElementById('virtual-keyboard');
         
-        searchInput.addEventListener('focus', () => { keyboard.style.display = 'flex'; });
+        searchInput.addEventListener('focus', () => { 
+            keyboard.style.display = 'flex'; 
+            closeHistoryMenu(); // Keep dropdown panels clean
+        });
         
         function pressKey(char) {
             if (char === 'backspace') {
@@ -273,43 +293,33 @@
             }
         }
 
-        // NEW: Configuration module for Speech Recognition Engine
         function initVoiceRecognition() {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            if (!SpeechRecognition) {
-                console.log("Speech recognition not supported in this environment.");
-                return;
-            }
+            if (!SpeechRecognition) return;
             recognition = new SpeechRecognition();
             recognition.continuous = false;
             recognition.interimResults = false;
-            recognition.lang = 'en-US'; // Can handle 'hy-AM' or 'ru-RU' as well
+            recognition.lang = 'en-US';
 
             recognition.onstart = () => {
                 isListening = true;
                 document.getElementById('mic-btn').classList.add('listening');
             };
-
             recognition.onend = () => {
                 isListening = false;
                 document.getElementById('mic-btn').classList.remove('listening');
             };
-
             recognition.onresult = (event) => {
-                const speechToText = event.results[0][0].transcript;
-                searchInput.value = speechToText;
+                searchInput.value = event.results[0][0].transcript;
                 keyboard.style.display = 'none';
-                handleTyping(); // Instantly process suggestions matching vocal transcription
+                closeHistoryMenu();
+                handleTyping(); 
             };
         }
 
         function toggleVoiceDictation() {
             if (!recognition) return;
-            if (isListening) {
-                recognition.stop();
-            } else {
-                recognition.start();
-            }
+            if (isListening) recognition.stop(); else recognition.start();
         }
 
         function setupGestureEventListeners() {
@@ -354,14 +364,26 @@
             }
         }
 
-        function showRecentHistory() {
-            if (searchInput.value.trim().length > 0) return;
+        // FIXED: Toggle layout rules governing history panel injections
+        function toggleHistoryMenu() {
+            if (isHistoryOpen) {
+                closeHistoryMenu();
+            } else {
+                openHistoryMenu();
+            }
+        }
+
+        function openHistoryMenu() {
+            isHistoryOpen = true;
+            keyboard.style.display = 'none'; // Close keyboard to clear view space
+            document.getElementById('history-btn').classList.add('active-history-btn');
             
             const box = document.getElementById('suggestions-box');
             let history = JSON.parse(localStorage.getItem('nav_history')) || [];
             
             if (history.length === 0) {
-                box.style.display = 'none';
+                box.innerHTML = '<div class="suggestion-item" style="cursor:default;">No history logs yet</div>';
+                box.style.display = 'block';
                 return;
             }
 
@@ -378,11 +400,19 @@
             });
         }
 
+        function closeHistoryMenu() {
+            isHistoryOpen = false;
+            document.getElementById('history-btn').classList.remove('active-history-btn');
+            document.getElementById('suggestions-box').style.display = 'none';
+        }
+
+        // FIXED: Cache queue size expanded to store 10 elements
         function saveToHistory(name, coords) {
             let history = JSON.parse(localStorage.getItem('nav_history')) || [];
             history = history.filter(item => item.name !== name);
             history.unshift({ name: name, coords: coords });
-            if (history.length > 3) history.pop();
+            
+            if (history.length > 10) history.pop(); // Trim queue past 10 logs
             localStorage.setItem('nav_history', JSON.stringify(history));
         }
 
@@ -510,14 +540,11 @@
         }
 
         function handleTyping() {
+            closeHistoryMenu(); // Auto close history dropdown when typing begins
             clearTimeout(typingTimeout);
             const query = document.getElementById('custom-search').value.trim();
             const box = document.getElementById('suggestions-box');
             
-            if (query.length === 0) {
-                showRecentHistory();
-                return;
-            }
             if (query.length < 2) { box.style.display = 'none'; return; }
 
             typingTimeout = setTimeout(() => {
@@ -547,7 +574,7 @@
         function selectDestination(coords, displayName) {
             destCoords = coords;
             document.getElementById('custom-search').value = displayName;
-            document.getElementById('suggestions-box').style.display = 'none';
+            closeHistoryMenu();
             keyboard.style.display = 'none'; 
             
             if (destMarker) map.removeLayer(destMarker);
