@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meta HUD - Fixed Traffic-Colored Multi-Route Navigator</title>
+    <title>Meta HUD - Traffic Multi-Route Navigator</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -520,10 +520,11 @@
             }
         }
 
+        // FIXED: Re-built string parameters cleanly without URL execution errors
         function calculateRoute() {
             if (!destCoords) return;
 
-            const tomTomUrl = `https://api.tomtom.com/routing/1/calculateRoute/${userCoords[0]},./${userCoords[1]}:${destCoords[0]},${destCoords[1]}/json?key=${TOMTOM_KEY}&traffic=true&departAt=now&maxAlternatives=2`;
+            const tomTomUrl = `https://api.tomtom.com/routing/1/calculateRoute/${userCoords[0]},${userCoords[1]}:${destCoords[0]},${destCoords[1]}/json?key=${TOMTOM_KEY}&traffic=true&departAt=now&maxAlternatives=2`;
 
             fetch(tomTomUrl)
                 .then(res => res.json())
@@ -541,20 +542,17 @@
                             const distanceKm = (route.summary.lengthInMeters / 1000).toFixed(1);
                             const durationMin = Math.round(route.summary.travelTimeInSeconds / 60);
                             
-                            // FIXED: Use explicit live traffic delay seconds to calculate robust color thresholds across alternative branches
                             const trafficDelay = route.summary.trafficDelayInSeconds || 0;
                             const totalDrivingTime = route.summary.travelTimeInSeconds;
-                            
-                            // Find percentage of total driving spent idling in static traffic delays
                             const delayRatio = trafficDelay / totalDrivingTime;
 
-                            let routeColor = '#00FF33'; // Light Green: Little to no structural delays
+                            let routeColor = '#00FF33'; 
                             if (delayRatio > 0.05 && delayRatio <= 0.18) {
-                                routeColor = '#FFFF00'; // Yellow: Noticeable delays
+                                routeColor = '#FFFF00'; 
                             } else if (delayRatio > 0.18 && delayRatio <= 0.35) {
-                                routeColor = '#FF3333'; // Red: Solid traffic jam
+                                routeColor = '#FF3333'; 
                             } else if (delayRatio > 0.35) {
-                                routeColor = '#8B0000'; // Dark Red: Complete standstill
+                                routeColor = '#8B0000'; 
                             }
 
                             let timeText = `${durationMin}m`;
