@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meta HUD - Gesture & History Navigator</title>
+    <title>Meta HUD - Voice, Gesture & History Navigator</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -57,7 +57,7 @@
         }
 
         #custom-search {
-            width: 150px;
+            width: 140px;
             height: 32px;
             background: #111111;
             border: 1px solid #444444;
@@ -75,9 +75,34 @@
             border-radius: 4px;
             cursor: pointer;
             font-size: 13px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         #custom-btn { background: #333333; color: #FFFFFF; border: 1px solid #555555; }
+        
+        /* NEW: Microphone Button Styling */
+        #mic-btn {
+            background: #222222;
+            color: #FFFFFF;
+            border: 1px solid #444444;
+            width: 36px;
+            padding: 0;
+        }
+        
+        #mic-btn.listening {
+            background: #FF3333 !important;
+            border-color: #FF3333;
+            animation: pulse-mic 1.2s infinite;
+        }
+
+        @keyframes pulse-mic {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
         #lock-btn { background: #111111; color: #FF6600; border: 1px solid #FF6600; }
         .active-lock { background: #FF6600 !important; color: #000000 !important; box-shadow: 0 0 10px rgba(255, 102, 0, 0.6); }
 
@@ -105,14 +130,8 @@
             color: #FF6600; 
         }
 
-        /* Style marker specific for historical items */
-        .history-item {
-            color: #888888;
-            font-style: italic;
-        }
-        .history-item::before {
-            content: "🕒 ";
-        }
+        .history-item { color: #888888; font-style: italic; }
+        .history-item::before { content: "🕒 "; }
 
         #virtual-keyboard {
             position: absolute;
@@ -129,53 +148,26 @@
             gap: 5px;
         }
 
-        .keyboard-row {
-            display: flex;
-            justify-content: center;
-            gap: 4px;
-        }
-
+        .keyboard-row { display: flex; justify-content: center; gap: 4px; }
         .key {
-            background: #222222;
-            border: 1px solid #444444;
-            color: #FFFFFF;
-            padding: 10px 0;
-            width: 48px;
-            text-align: center;
-            border-radius: 4px;
-            cursor: pointer;
-            font-weight: bold;
-            font-size: 14px;
-            user-select: none;
+            background: #222222; border: 1px solid #444444; color: #FFFFFF; padding: 10px 0;
+            width: 48px; text-align: center; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 14px; user-select: none;
         }
         .key:active { background: #FF6600; color: #000000; }
         .key.wide { width: 100px; }
         .key.space { width: 220px; }
 
         .nav-arrow-svg {
-            width: 32px;
-            height: 32px;
-            fill: #444444; 
+            width: 32px; height: 32px; fill: #444444; 
             filter: drop-shadow(0px 1px 3px rgba(255, 255, 255, 0.3));
             transition: transform 0.1s linear;
         }
 
         #hud-stats-bar {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 600px;
-            height: 70px;
-            background-color: rgba(10, 10, 10, 0.9);
-            border-bottom: 2px solid #333333;
-            z-index: 2000;
-            display: flex;
-            justify-content: space-around;
-            align-items: center;
-            box-sizing: border-box;
-            padding: 0 10px;
+            position: absolute; top: 0; left: 0; width: 600px; height: 70px;
+            background-color: rgba(10, 10, 10, 0.9); border-bottom: 2px solid #333333; z-index: 2000;
+            display: flex; justify-content: space-around; align-items: center; box-sizing: border-box; padding: 0 10px;
         }
-
         .stat-element { text-align: center; }
         .stat-val { font-size: 20px; font-weight: bold; color: #FF6600; } 
         .stat-lbl { font-size: 11px; color: #888888; text-transform: uppercase; margin-top: 2px; }
@@ -201,6 +193,12 @@
     <div id="search-container">
         <div id="input-wrapper">
             <input type="text" id="custom-search" placeholder="Search places..." autocomplete="off" oninput="handleTyping()" onfocus="showRecentHistory()">
+            <!-- NEW: Microphone Icon Button Trigger -->
+            <button id="mic-btn" class="btn" onclick="toggleVoiceDictation()" title="Voice Search">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/>
+                </svg>
+            </button>
             <button id="custom-btn" class="btn" onclick="triggerManualSearch()">Go</button>
             <button id="lock-btn" class="btn" onclick="toggleLockView()">Follow</button>
         </div>
@@ -243,6 +241,10 @@
         let currentFocusIndex = -1;
         const armeniaViewbox = "43.4,41.4,46.6,38.8";
 
+        // Speech Recognition Initializations
+        let recognition = null;
+        let isListening = false;
+
         function initMap() {
             map = L.map('map', { zoomControl: false }).setView(userCoords, 16);
             L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
@@ -250,6 +252,7 @@
             startLiveTracking();
             startCompassTracking();
             setupGestureEventListeners();
+            initVoiceRecognition();
         }
 
         const searchInput = document.getElementById('custom-search');
@@ -270,13 +273,50 @@
             }
         }
 
-        // FIXED: Maps Meta neural band wristband gestures to interface movements
+        // NEW: Configuration module for Speech Recognition Engine
+        function initVoiceRecognition() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                console.log("Speech recognition not supported in this environment.");
+                return;
+            }
+            recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.lang = 'en-US'; // Can handle 'hy-AM' or 'ru-RU' as well
+
+            recognition.onstart = () => {
+                isListening = true;
+                document.getElementById('mic-btn').classList.add('listening');
+            };
+
+            recognition.onend = () => {
+                isListening = false;
+                document.getElementById('mic-btn').classList.remove('listening');
+            };
+
+            recognition.onresult = (event) => {
+                const speechToText = event.results[0][0].transcript;
+                searchInput.value = speechToText;
+                keyboard.style.display = 'none';
+                handleTyping(); // Instantly process suggestions matching vocal transcription
+            };
+        }
+
+        function toggleVoiceDictation() {
+            if (!recognition) return;
+            if (isListening) {
+                recognition.stop();
+            } else {
+                recognition.start();
+            }
+        }
+
         function setupGestureEventListeners() {
             document.addEventListener('keydown', (e) => {
                 const box = document.getElementById('suggestions-box');
                 const items = box.getElementsByClassName('suggestion-item');
                 
-                // 1. Swipe Up/Down or Left/Right movements cycle through choices
                 if (box.style.display === 'block' && items.length > 0) {
                     if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
                         e.preventDefault();
@@ -289,7 +329,6 @@
                         if (currentFocusIndex < 0) currentFocusIndex = items.length - 1;
                         updateSuggestionHighlight(items);
                     } 
-                    // 2. Double Pinch / Index Pinch acts as an Enter selection trigger
                     else if (e.key === 'Enter') {
                         e.preventDefault();
                         if (currentFocusIndex > -1 && currentFocusIndex < items.length) {
@@ -297,7 +336,6 @@
                         }
                     }
                 } else {
-                    // 3. Wrist Flick/Shake gesture maps to Escape to instantly toggle 3D lock tracking
                     if (e.key === 'Escape') {
                         e.preventDefault();
                         toggleLockView();
@@ -316,7 +354,6 @@
             }
         }
 
-        // NEW: Pulls and prints last 3 cached history positions onto dropdown
         function showRecentHistory() {
             if (searchInput.value.trim().length > 0) return;
             
@@ -341,17 +378,11 @@
             });
         }
 
-        // NEW: Evaluates successful targets and logs them inside localStorage index cache
         function saveToHistory(name, coords) {
             let history = JSON.parse(localStorage.getItem('nav_history')) || [];
-            
-            // Deduplicate entry logs
             history = history.filter(item => item.name !== name);
-            
-            // Push to head and trim stack to 3 items max
             history.unshift({ name: name, coords: coords });
             if (history.length > 3) history.pop();
-            
             localStorage.setItem('nav_history', JSON.stringify(history));
         }
 
@@ -522,7 +553,7 @@
             if (destMarker) map.removeLayer(destMarker);
             destMarker = L.circleMarker(destCoords, { color: '#FF3366', radius: 5 }).addTo(map);
 
-            saveToHistory(displayName, coords); // Cache successful search items
+            saveToHistory(displayName, coords); 
             startTripTimer(); 
             calculateRoute();
         }
