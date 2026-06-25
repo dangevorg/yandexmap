@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meta HUD - Smart Partial Match Navigator</title>
+    <title>Meta HUD - Strict Armenia Filter Navigator</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -535,8 +535,8 @@
             if (query.length < 2) { box.style.display = 'none'; return; }
 
             typingTimeout = setTimeout(() => {
-                // Fetching up to 15 entries to give our sorting filter maximum material to work with
-                fetch(`https://nominatim.openstreetmap.org/search?format=json&viewbox=${armeniaViewbox}&bounded=0&q=${encodeURIComponent(query)}&limit=15`)
+                // Requesting a larger batch (20 items) to guarantee we catch local data points
+                fetch(`https://nominatim.openstreetmap.org/search?format=json&viewbox=${armeniaViewbox}&bounded=0&q=${encodeURIComponent(query)}&limit=20`)
                     .then(res => res.json())
                     .then(data => {
                         box.innerHTML = '';
@@ -545,28 +545,36 @@
                         if (data && data.length > 0) {
                             box.style.display = 'block';
 
-                            // FIXED: Ultra-aggressive text classification filter sorting rules
-                            data.sort((a, b) => {
+                            // FIXED CRITICAL BUCKETING ARCHITECTURE
+                            let armeniaBucket = [];
+                            let globalBucket = [];
+
+                            data.forEach(item => {
+                                const displayNameLower = item.display_name.toLowerCase();
+                                const isArmenia = displayNameLower.includes('armenia') || 
+                                                  displayNameLower.includes('հայաստան') || 
+                                                  displayNameLower.includes('երևան') || 
+                                                  displayNameLower.includes('yerevan');
+                                
+                                if (isArmenia) {
+                                    armeniaBucket.push(item);
+                                } else {
+                                    globalBucket.push(item);
+                                }
+                            });
+
+                            // Sub-sorting Armenia matches by name match priority
+                            armeniaBucket.sort((a, b) => {
                                 const qStr = query.toLowerCase();
                                 const nameA = (a.display_name.split(',')[0] || '').toLowerCase();
                                 const nameB = (b.display_name.split(',')[0] || '').toLowerCase();
-
-                                const aInArmenia = a.display_name.toLowerCase().includes('armenia') || a.display_name.includes('հայաստան') || a.display_name.toLowerCase().includes('երևան');
-                                const bInArmenia = b.display_name.toLowerCase().includes('armenia') || b.display_name.includes('հայաստան') || b.display_name.toLowerCase().includes('երևան');
-
-                                // Rule 1: Prioritize localized geographical context match layers explicitly first
-                                if (aInArmenia !== bInArmenia) return bInArmenia - aInArmenia;
-
-                                // Rule 2: If both are local, force true partial matches (e.g., "tum" -> "tumo") directly to the top 
-                                const aStarts = nameA.startsWith(qStr);
-                                const bStarts = nameB.startsWith(qStr);
-                                if (aStarts !== bStarts) return bStarts - aStarts;
-
-                                return 0;
+                                return nameB.startsWith(qStr) - nameA.startsWith(qStr);
                             });
 
-                            // Slice clean top 5 choices straight to display rows
-                            data.slice(0, 5).forEach((item) => {
+                            // Recompile final combined list: Armenia Always Wins
+                            const finalizedResults = armeniaBucket.concat(globalBucket).slice(0, 5);
+
+                            finalizedResults.forEach((item) => {
                                 let div = document.createElement('div');
                                 div.className = 'suggestion-item';
                                 let cleanName = item.display_name.split(',')[0];
@@ -578,7 +586,7 @@
                             });
                         } else { box.style.display = 'none'; }
                     }).catch(() => {});
-            }, 300); // Shrunk fallback timeout speed down to 300ms for fast feedback lookups
+            }, 300);
         }
 
         function selectDestination(coords, displayName) {
