@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meta HUD - Strict Armenia Forced Navigator</title>
+    <title>Meta HUD - TomTom Live Traffic Navigator</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -237,6 +237,9 @@
     <div id="map"></div>
 
     <script type="text/javascript">
+        // READY: Integrated Your Custom Active Live-Traffic Routing Token Key
+        const TOMTOM_KEY = "jeXPT9KCLIJWZ5S3Hy8aHjuK6h2Sokoj"; 
+
         let map;
         let userCoords = [40.1792, 44.5152]; 
         let userMarker = null;
@@ -469,42 +472,56 @@
         function calculateRoute() {
             if (!destCoords) return;
 
-            const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${userCoords[1]},${userCoords[0]};${destCoords[1]},${destCoords[0]}?geometries=geojson`;
+            if (TOMTOM_KEY === "YOUR_TOMTOM_KEY" || TOMTOM_KEY === "") {
+                const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${userCoords[1]},${userCoords[0]};${destCoords[1]},${destCoords[0]}?geometries=geojson`;
+                fetch(osrmUrl)
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.routes && data.routes.length > 0) {
+                            processRouteGeometry(data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]), data.routes[0].distance / 1000, Math.round(data.routes[0].duration / 60));
+                        }
+                    });
+                return;
+            }
 
-            fetch(osrmUrl)
+            const tomTomUrl = `https://api.tomtom.com/routing/1/calculateRoute/${userCoords[0]},${userCoords[1]}:${destCoords[0]},${destCoords[1]}/json?key=${TOMTOM_KEY}&traffic=true&departAt=now`;
+
+            fetch(tomTomUrl)
                 .then(res => res.json())
                 .then(data => {
                     if (data.routes && data.routes.length > 0) {
                         const route = data.routes[0];
-                        const geometry = route.geometry.coordinates;
-                        const leafCoordinates = geometry.map(coord => [coord[1], coord[0]]);
-
-                        const distanceKm = (route.distance / 1000).toFixed(1);
-                        const durationMin = Math.round(route.duration / 60);
-
-                        let displayTime = `${durationMin} min`;
-                        if (durationMin >= 60) {
-                            const hours = Math.floor(durationMin / 60);
-                            const remainingMins = durationMin % 60;
-                            displayTime = remainingMins > 0 ? `${hours}h ${remainingMins}m` : `${hours}h`;
-                        }
-
-                        document.getElementById('hud-distance').innerText = `${distanceKm} km`;
-                        document.getElementById('hud-remaining').innerText = displayTime;
-
-                        if (activeRouteLine) map.removeLayer(activeRouteLine);
-
-                        activeRouteLine = L.polyline(leafCoordinates, {
-                            color: '#00FF33',
-                            weight: 3, 
-                            opacity: 0.95
-                        }).addTo(map);
-
-                        if (!isLockedView) {
-                            map.fitBounds(activeRouteLine.getBounds(), { padding: [40, 40] });
-                        }
+                        const distanceKm = (route.summary.lengthInMeters / 1000).toFixed(1);
+                        const durationMin = Math.round(route.summary.travelTimeInSeconds / 60);
+                        const coordinates = route.legs[0].points.map(p => [p.latitude, p.longitude]);
+                        
+                        processRouteGeometry(coordinates, distanceKm, durationMin);
                     }
                 }).catch(() => {});
+        }
+
+        function processRouteGeometry(leafCoordinates, distanceKm, durationMin) {
+            let displayTime = `${durationMin} min`;
+            if (durationMin >= 60) {
+                const hours = Math.floor(durationMin / 60);
+                const remainingMins = durationMin % 60;
+                displayTime = remainingMins > 0 ? `${hours}h ${remainingMins}m` : `${hours}h`;
+            }
+
+            document.getElementById('hud-distance').innerText = `${distanceKm} km`;
+            document.getElementById('hud-remaining').innerText = displayTime;
+
+            if (activeRouteLine) map.removeLayer(activeRouteLine);
+
+            activeRouteLine = L.polyline(leafCoordinates, {
+                color: '#00FF33',
+                weight: 3, 
+                opacity: 0.95
+            }).addTo(map);
+
+            if (!isLockedView) {
+                map.fitBounds(activeRouteLine.getBounds(), { padding: [40, 40] });
+            }
         }
 
         function startTripTimer() {
@@ -535,8 +552,6 @@
             if (query.length < 2) { box.style.display = 'none'; return; }
 
             typingTimeout = setTimeout(() => {
-                // FIXED CRITICAL BACKGROUND APPEND STRATEGY:
-                // If query length is under 4 characters, force ", Armenia" onto backend fetch string
                 let forcedQuery = query;
                 if (query.length <= 3) {
                     forcedQuery += ", Armenia";
