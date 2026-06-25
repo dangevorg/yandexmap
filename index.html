@@ -293,8 +293,11 @@
         let typingTimeout;
         let isLockedView = false;
         let userHeading = 0;
+        
+        // Timer references
         let tripStartTime = null;
         let elapsedInterval = null;
+        let totalAccumulatedSeconds = 0; // Tracks spent journey execution seconds across locks
 
         let currentFocusIndex = -1;
         let isHistoryOpen = false; 
@@ -501,6 +504,7 @@
             }, true);
         }
 
+        // FIXED: Controls on-road execution clock sequences explicitly when follow statuses toggle
         function toggleLockView() {
             isLockedView = !isLockedView;
             const btn = document.getElementById('lock-btn');
@@ -512,11 +516,18 @@
                 mapContainer.classList.add('tilt-3d'); 
                 const offsetLat = userCoords[0] + 0.0015;
                 map.setView([offsetLat, userCoords[1]], 17);
+                
+                // Only begin or resume tracking if a destination has been mapped out
+                if (destCoords) {
+                    startTripTimer();
+                }
             } else {
                 btn.classList.remove('active-lock');
                 btn.innerText = "Follow";
                 mapContainer.classList.remove('tilt-3d'); 
                 map.setView(userCoords, 16);
+                
+                pauseTripTimer();
             }
         }
 
@@ -541,21 +552,17 @@
                             const distanceKm = (route.summary.lengthInMeters / 1000).toFixed(1);
                             const durationMin = Math.round(route.summary.travelTimeInSeconds / 60);
                             
-                            // FIXED TIME INFLATION COMPARISON MATH:
-                            // We compare real-time driving duration directly with empty-road freeflow duration thresholds.
-                            const liveDrivingTime = route.summary.travelTimeInSeconds;
-                            const baselineFreeflowTime = route.summary.noTrafficTravelTimeInSeconds || route.summary.historicTravelTimeInSeconds || liveDrivingTime;
-                            
-                            // Ratio multiplier factor (e.g. 1.20 = 20% total time penalty added by slow street speeds)
-                            const structuralDelayRatio = liveDrivingTime / baselineFreeflowTime;
+                            const trafficDelay = route.summary.trafficDelayInSeconds || 0;
+                            const totalDrivingTime = route.summary.travelTimeInSeconds;
+                            const delayRatio = trafficDelay / totalDrivingTime;
 
-                            let routeColor = '#00FF33'; // Light Green: Flowing perfectly (under 6% delay)
-                            if (structuralDelayRatio > 1.06 && structuralDelayRatio <= 1.22) {
-                                routeColor = '#FFFF00'; // Yellow: Moderate slowing / light traffic
-                            } else if (structuralDelayRatio > 1.22 && structuralDelayRatio <= 1.45) {
-                                routeColor = '#FF3333'; // Red: Heavy delay bottleneck
-                            } else if (structuralDelayRatio > 1.45) {
-                                routeColor = '#8B0000'; // Dark Red: Near complete gridlock / crawling speeds
+                            let routeColor = '#00FF33'; 
+                            if (delayRatio > 0.05 && delayRatio <= 0.18) {
+                                routeColor = '#FFFF00'; 
+                            } else if (delayRatio > 0.18 && delayRatio <= 0.35) {
+                                routeColor = '#FF3333'; 
+                            } else if (delayRatio > 0.35) {
+                                routeColor = '#8B0000'; 
                             }
 
                             let timeText = `${durationMin}m`;
@@ -605,11 +612,15 @@
             calculateRoute();
         }
 
+        // FIXED: Only tracks driving duration logs when Follow navigation window is explicitly enabled
         function startTripTimer() {
             if (elapsedInterval) clearInterval(elapsedInterval);
             tripStartTime = Date.now();
+            
             elapsedInterval = setInterval(() => {
-                const totalSeconds = Math.floor((Date.now() - tripStartTime) / 1000);
+                const currentSessionSeconds = Math.floor((Date.now() - tripStartTime) / 1000);
+                const totalSeconds = totalAccumulatedSeconds + currentSessionSeconds;
+                
                 const totalMinutes = Math.floor(totalSeconds / 60);
                 const seconds = (totalSeconds % 60).toString().padStart(2, '0');
                 
@@ -622,6 +633,26 @@
                     document.getElementById('hud-elapsed').innerText = `${minutes}:${seconds}`;
                 }
             }, 1000);
+        }
+
+        function pauseTripTimer() {
+            if (elapsedInterval) {
+                clearInterval(elapsedInterval);
+                elapsedInterval = null;
+                // Commit current driving segment duration to persistent loop memory cache 
+                if (tripStartTime) {
+                    totalAccumulatedSeconds += Math.floor((Date.now() - tripStartTime) / 1000);
+                }
+                tripStartTime = null;
+            }
+        }
+
+        function resetTripTimer() {
+            if (elapsedInterval) clearInterval(elapsedInterval);
+            elapsedInterval = null;
+            tripStartTime = null;
+            totalAccumulatedSeconds = 0;
+            document.getElementById('hud-elapsed').innerText = "00:00";
         }
 
         function handleTyping() {
@@ -699,8 +730,15 @@
             destMarker = L.circleMarker(destCoords, { color: '#FF3366', radius: 5 }).addTo(map);
 
             saveToHistory(displayName, coords); 
-            startTripTimer(); 
+            
+            // FIXED: Reset travel timers to zero on initial destination choice selection
+            resetTripTimer();
             calculateRoute();
+            
+            // Auto start driving clock metrics if user is already locked into Follow mode
+            if (isLockedView) {
+                startTripTimer();
+            }
         }
 
         function triggerManualSearch() {
@@ -718,8 +756,12 @@
                         destMarker = L.circleMarker(destCoords, { color: '#FF3366', radius: 5 }).addTo(map);
                         
                         saveToHistory(name, destCoords);
-                        startTripTimer();
+                        resetTripTimer();
                         calculateRoute();
+                        
+                        if (isLockedView) {
+                            startTripTimer();
+                        }
                     }
                 });
         }
