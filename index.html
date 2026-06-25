@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Meta HUD - 10-Item History Navigator</title>
+    <title>Meta HUD - Priority Armenia Navigator</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -96,7 +96,6 @@
             animation: pulse-mic 1.2s infinite;
         }
 
-        /* NEW: History Button Style Layout */
         #history-btn {
             background: #222222;
             color: #888888;
@@ -205,12 +204,7 @@
     <div id="search-container">
         <div id="input-wrapper">
             <input type="text" id="custom-search" placeholder="Search..." autocomplete="off" oninput="handleTyping()">
-            
-            <!-- NEW: Dedicated History Log Trigger Button -->
-            <button id="history-btn" class="btn" onclick="toggleHistoryMenu()" title="Search History">
-                🕒
-            </button>
-            
+            <button id="history-btn" class="btn" onclick="toggleHistoryMenu()" title="Search History">🕒</button>
             <button id="mic-btn" class="btn" onclick="toggleVoiceDictation()" title="Voice Search">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/>
@@ -256,7 +250,7 @@
         let elapsedInterval = null;
 
         let currentFocusIndex = -1;
-        let isHistoryOpen = false; // Tracks state of custom history sub-menu
+        let isHistoryOpen = false; 
         const armeniaViewbox = "43.4,41.4,46.6,38.8";
 
         let recognition = null;
@@ -277,7 +271,7 @@
         
         searchInput.addEventListener('focus', () => { 
             keyboard.style.display = 'flex'; 
-            closeHistoryMenu(); // Keep dropdown panels clean
+            closeHistoryMenu(); 
         });
         
         function pressKey(char) {
@@ -364,18 +358,13 @@
             }
         }
 
-        // FIXED: Toggle layout rules governing history panel injections
         function toggleHistoryMenu() {
-            if (isHistoryOpen) {
-                closeHistoryMenu();
-            } else {
-                openHistoryMenu();
-            }
+            if (isHistoryOpen) closeHistoryMenu(); else openHistoryMenu();
         }
 
         function openHistoryMenu() {
             isHistoryOpen = true;
-            keyboard.style.display = 'none'; // Close keyboard to clear view space
+            keyboard.style.display = 'none'; 
             document.getElementById('history-btn').classList.add('active-history-btn');
             
             const box = document.getElementById('suggestions-box');
@@ -406,13 +395,11 @@
             document.getElementById('suggestions-box').style.display = 'none';
         }
 
-        // FIXED: Cache queue size expanded to store 10 elements
         function saveToHistory(name, coords) {
             let history = JSON.parse(localStorage.getItem('nav_history')) || [];
             history = history.filter(item => item.name !== name);
             history.unshift({ name: name, coords: coords });
-            
-            if (history.length > 10) history.pop(); // Trim queue past 10 logs
+            if (history.length > 10) history.pop(); 
             localStorage.setItem('nav_history', JSON.stringify(history));
         }
 
@@ -540,7 +527,7 @@
         }
 
         function handleTyping() {
-            closeHistoryMenu(); // Auto close history dropdown when typing begins
+            closeHistoryMenu(); 
             clearTimeout(typingTimeout);
             const query = document.getElementById('custom-search').value.trim();
             const box = document.getElementById('suggestions-box');
@@ -548,7 +535,7 @@
             if (query.length < 2) { box.style.display = 'none'; return; }
 
             typingTimeout = setTimeout(() => {
-                fetch(`https://nominatim.openstreetmap.org/search?format=json&viewbox=${armeniaViewbox}&bounded=0&q=${encodeURIComponent(query)}&limit=5`)
+                fetch(`https://nominatim.openstreetmap.org/search?format=json&viewbox=${armeniaViewbox}&bounded=0&q=${encodeURIComponent(query)}&limit=10`)
                     .then(res => res.json())
                     .then(data => {
                         box.innerHTML = '';
@@ -556,7 +543,16 @@
                         
                         if (data && data.length > 0) {
                             box.style.display = 'block';
-                            data.forEach((item) => {
+
+                            // FIXED: Sort results so anything inside Armenia is forced to the top
+                            data.sort((a, b) => {
+                                const aInArmenia = a.display_name.toLowerCase().includes('armenia') || a.display_name.includes('հայաստան') || a.display_name.toLowerCase().includes('երևան');
+                                const bInArmenia = b.display_name.toLowerCase().includes('armenia') || b.display_name.includes('հայաստան') || b.display_name.toLowerCase().includes('երևան');
+                                return bInArmenia - aInArmenia; 
+                            });
+
+                            // Display only the top 5 sorted results
+                            data.slice(0, 5).forEach((item) => {
                                 let div = document.createElement('div');
                                 div.className = 'suggestion-item';
                                 let cleanName = item.display_name.split(',')[0];
@@ -574,7 +570,7 @@
         function selectDestination(coords, displayName) {
             destCoords = coords;
             document.getElementById('custom-search').value = displayName;
-            closeHistoryMenu();
+            document.getElementById('suggestions-box').style.display = 'none';
             keyboard.style.display = 'none'; 
             
             if (destMarker) map.removeLayer(destMarker);
